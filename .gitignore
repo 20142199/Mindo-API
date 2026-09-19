@@ -1,0 +1,12 @@
+node_modules
+dist
+.env
+coverage
+*.log
+*.tsbuildinfo
+admin/.vite
+contracts/cache
+contracts/artifacts
+contracts/typechain-types
+contracts/
+api/storage

@@ -1,0 +1,15 @@
+{
+  "name": "mindo-phase1-platform",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["api", "admin"],
+  "scripts": {
+    "dev:api": "npm run start:dev -w api",
+    "dev:admin": "npm run dev -w admin",
+    "build": "npm run build -w api && npm run build -w admin",
+    "test": "npm run test -w api && npm run test -w admin"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.0"
+  }
+}

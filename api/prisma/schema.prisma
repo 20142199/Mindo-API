@@ -1,0 +1,579 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  INVESTOR
+  ADMIN
+  COMPLIANCE
+  FINANCE
+}
+
+enum UserStatus {
+  ACTIVE
+  LOCKED
+  DELETED
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DepositStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+enum OrderStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum LedgerDirection {
+  CREDIT
+  DEBIT
+}
+
+enum ArticleStatus {
+  DRAFT
+  PUBLISHED
+  HIDDEN
+}
+
+enum AgencyStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  LOCKED
+}
+
+enum AgencyPackageStatus {
+  ACTIVE
+  EXHAUSTED
+  CANCELLED
+}
+
+enum CommissionStatus {
+  EARNED
+  PAID
+  CANCELLED
+}
+
+enum AiConversationStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum AiMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum AiMessageKind {
+  CHAT
+  IMAGE
+  DOCUMENT
+  TRANSLATION
+}
+
+enum AiMessageStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum CallType {
+  AUDIO
+  VIDEO
+}
+
+enum CallStatus {
+  RINGING
+  ACCEPTED
+  COMPLETED
+  REJECTED
+  CANCELLED
+  MISSED
+  FAILED
+}
+
+model User {
+  id                        String                @id @default(cuid())
+  email                     String                @unique
+  passwordHash              String
+  fullName                  String
+  nickname                  String?
+  referralCode              String                @unique @default(cuid())
+  referredById              String?
+  phone                     String?
+  phoneNormalized           String?               @unique
+  address                   String?
+  avatarFileId              String?
+  bankAccountName           String?
+  bankAccountNumber         String?
+  bankName                  String?
+  language                  String                @default("vi")
+  suspiciousLoginAlerts     Boolean               @default(true)
+  loginRateLimitEnabled     Boolean               @default(true)
+  inAppNotifications        Boolean               @default(true)
+  emailNotifications        Boolean               @default(true)
+  failedLoginAttempts       Int                   @default(0)
+  loginLockedUntil          DateTime?
+  role                      UserRole              @default(INVESTOR)
+  status                    UserStatus            @default(ACTIVE)
+  balanceVnd                Decimal               @default(0) @db.Decimal(20, 0)
+  emailVerifiedAt           DateTime?
+  termsAcceptedAt           DateTime?
+  kycVerifiedAt             DateTime?
+  createdAt                 DateTime              @default(now())
+  updatedAt                 DateTime              @updatedAt
+  refreshTokens             RefreshToken[]
+  passwordResetTickets      PasswordResetTicket[]
+  kycSubmissions            KycSubmission[]       @relation("KycOwner")
+  reviewedKyc               KycSubmission[]       @relation("KycReviewer")
+  deposits                  Deposit[]             @relation("DepositOwner")
+  reviewedDeposits          Deposit[]             @relation("DepositReviewer")
+  purchaseOrders            PurchaseOrder[]
+  nftAssets                 NftAsset[]
+  ledgerEntries             LedgerEntry[]
+  files                     FileUpload[]
+  auditLogs                 AuditLog[]            @relation("AuditActor")
+  referredBy                User?                 @relation("UserReferrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals                 User[]                @relation("UserReferrals")
+  agency                    Agency?               @relation("AgencyOwner")
+  reviewedAgencies          Agency[]              @relation("AgencyReviewer")
+  agencyCommissionPurchases AgencyCommission[]    @relation("CommissionBuyer")
+  issuedAgencyContracts     AgencyContract[]      @relation("ContractIssuer")
+  aiConversations           AiConversation[]
+  outgoingCalls             Call[]                @relation("CallCaller")
+  incomingCalls             Call[]                @relation("CallCallee")
+  sentFriendRequests        FriendRequest[]        @relation("FriendRequestSender")
+  receivedFriendRequests    FriendRequest[]        @relation("FriendRequestRecipient")
+  friendships               Friendship[]           @relation("FriendshipOwner")
+  friendOf                  Friendship[]           @relation("FriendshipTarget")
+}
+
+model FriendRequest {
+  requesterId String
+  recipientId String
+  createdAt   DateTime @default(now())
+  requester   User     @relation("FriendRequestSender", fields: [requesterId], references: [id], onDelete: Cascade)
+  recipient   User     @relation("FriendRequestRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@id([requesterId, recipientId])
+  @@index([recipientId, createdAt])
+  @@index([requesterId, createdAt])
+}
+
+model Friendship {
+  userId       String
+  friendUserId String
+  createdAt    DateTime @default(now())
+  user         User     @relation("FriendshipOwner", fields: [userId], references: [id], onDelete: Cascade)
+  friend       User     @relation("FriendshipTarget", fields: [friendUserId], references: [id], onDelete: Cascade)
+
+  @@id([userId, friendUserId])
+  @@index([friendUserId])
+  @@index([userId, createdAt])
+}
+
+model Call {
+  id             String     @id @default(uuid())
+  channelName    String     @unique
+  conversationId String?
+  callerId       String
+  calleeId       String
+  callType       CallType
+  status         CallStatus @default(RINGING)
+  endReason      String?
+  ringingAt      DateTime   @default(now())
+  acceptedAt     DateTime?
+  endedAt        DateTime?
+  durationSec    Int        @default(0)
+  callerClient   String?
+  calleeClient   String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  caller         User       @relation("CallCaller", fields: [callerId], references: [id])
+  callee         User       @relation("CallCallee", fields: [calleeId], references: [id])
+
+  @@index([callerId, status])
+  @@index([calleeId, status])
+  @@index([createdAt])
+  @@index([conversationId, createdAt])
+}
+
+model RefreshToken {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  userId     String
+  deviceInfo String?
+  deviceType String?
+  location   String?
+  fcmToken   String?
+  ipAddress  String?
+  userAgent  String?
+  expiresAt  DateTime
+  lastUsedAt DateTime  @default(now())
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt, expiresAt])
+}
+
+model PasswordResetTicket {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model VerificationCode {
+  id         String    @id @default(cuid())
+  email      String
+  purpose    String
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now())
+
+  @@index([email, purpose, createdAt])
+}
+
+model KycSubmission {
+  id                String       @id @default(cuid())
+  userId            String
+  fullName          String
+  dateOfBirth       DateTime?
+  idCardNumber      String?
+  phoneNumber       String
+  address           String
+  bankAccountName   String?
+  bankAccountNumber String?
+  bankName          String?
+  idFrontFileUrl    String
+  idBackFileUrl     String
+  selfieFileUrl     String?
+  status            ReviewStatus @default(PENDING)
+  rejectionReason   String?
+  reviewNote        String?
+  reviewedById      String?
+  reviewedAt        DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  user              User         @relation("KycOwner", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedBy        User?        @relation("KycReviewer", fields: [reviewedById], references: [id])
+
+  @@index([status, createdAt])
+}
+
+model Deposit {
+  id                  String        @id @default(cuid())
+  userId              String
+  amountVnd           Decimal       @db.Decimal(20, 0)
+  transferCode        String        @unique
+  proofFileUrl        String?
+  idempotencyKey      String        @unique
+  status              DepositStatus @default(PENDING)
+  reviewedById        String?
+  reviewedAt          DateTime?
+  reviewNote          String?
+  vietQrOrderId       String?       @unique
+  qrCodeUrl           String?
+  vietQrData          Json?
+  bankTransactionId   String?       @unique
+  bankReferenceNumber String?
+  paidAmountVnd       Decimal?      @db.Decimal(20, 0)
+  paidAt              DateTime?
+  balanceBeforeVnd    Decimal?      @db.Decimal(20, 0)
+  balanceAfterVnd     Decimal?      @db.Decimal(20, 0)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  user                User          @relation("DepositOwner", fields: [userId], references: [id])
+  reviewedBy          User?         @relation("DepositReviewer", fields: [reviewedById], references: [id])
+  ledgerEntry         LedgerEntry?
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+}
+
+model FileUpload {
+  id           String   @id @default(cuid())
+  ownerId      String
+  originalName String
+  storedName   String   @unique
+  mimeType     String
+  size         Int
+  createdAt    DateTime @default(now())
+  owner        User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, createdAt])
+}
+
+model NftProduct {
+  id              String                  @id @default(cuid())
+  name            String
+  symbol          String
+  description     String
+  imageUrl        String
+  metadataBaseUrl String
+  unitPriceVnd    Decimal                 @db.Decimal(20, 0)
+  totalSupply     Int
+  soldCount       Int                     @default(0)
+  isActive        Boolean                 @default(true)
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  purchaseOrders  PurchaseOrder[]
+  nftAssets       NftAsset[]
+  agencyPackages  AgencyPackagePurchase[]
+}
+
+model PurchaseOrder {
+  id               String            @id @default(cuid())
+  userId           String
+  productId        String
+  quantity         Int
+  unitPriceVnd     Decimal           @db.Decimal(20, 0)
+  totalVnd         Decimal           @db.Decimal(20, 0)
+  idempotencyKey   String            @unique
+  status           OrderStatus       @default(PENDING)
+  agencyId         String?
+  commissionRate   Decimal?          @db.Decimal(5, 4)
+  commissionVnd    Decimal?          @db.Decimal(20, 0)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  user             User              @relation(fields: [userId], references: [id])
+  product          NftProduct        @relation(fields: [productId], references: [id])
+  ledgerEntry      LedgerEntry?
+  nftAssets        NftAsset[]
+  agency           Agency?           @relation(fields: [agencyId], references: [id])
+  agencyCommission AgencyCommission?
+
+  @@index([status, createdAt])
+}
+
+model NftAsset {
+  id          String        @id @default(cuid())
+  assetCode   String        @unique
+  metadataUrl String
+  ownerId     String
+  productId   String
+  orderId     String
+  issuedAt    DateTime      @default(now())
+  owner       User          @relation(fields: [ownerId], references: [id])
+  product     NftProduct    @relation(fields: [productId], references: [id])
+  order       PurchaseOrder @relation(fields: [orderId], references: [id])
+
+  @@index([ownerId, issuedAt])
+}
+
+model LedgerEntry {
+  id           String            @id @default(cuid())
+  userId       String
+  amountVnd    Decimal           @db.Decimal(20, 0)
+  direction    LedgerDirection
+  description  String
+  depositId    String?           @unique
+  orderId      String?           @unique
+  commissionId String?           @unique
+  createdAt    DateTime          @default(now())
+  user         User              @relation(fields: [userId], references: [id])
+  deposit      Deposit?          @relation(fields: [depositId], references: [id])
+  order        PurchaseOrder?    @relation(fields: [orderId], references: [id])
+  commission   AgencyCommission? @relation(fields: [commissionId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+model Agency {
+  id                 String                  @id @default(cuid())
+  userId             String                  @unique
+  code               String                  @unique
+  businessName       String
+  taxCode            String?
+  phone              String
+  address            String
+  status             AgencyStatus            @default(PENDING)
+  parentId           String?
+  reviewNote         String?
+  rejectionReason    String?
+  reviewedById       String?
+  reviewedAt         DateTime?
+  approvedAt         DateTime?
+  lockedAt           DateTime?
+  totalRevenueVnd    Decimal                 @default(0) @db.Decimal(20, 0)
+  totalCommissionVnd Decimal                 @default(0) @db.Decimal(20, 0)
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  user               User                    @relation("AgencyOwner", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedBy         User?                   @relation("AgencyReviewer", fields: [reviewedById], references: [id])
+  parent             Agency?                 @relation("AgencyTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children           Agency[]                @relation("AgencyTree")
+  store              AgencyStore?
+  packages           AgencyPackagePurchase[]
+  commissions        AgencyCommission[]
+  purchaseOrders     PurchaseOrder[]
+  contract           AgencyContract?
+
+  @@index([status, createdAt])
+  @@index([parentId])
+}
+
+model AgencyStore {
+  id           String   @id @default(cuid())
+  agencyId     String   @unique
+  slug         String   @unique
+  name         String
+  description  String?
+  logoUrl      String?
+  bannerUrl    String?
+  contactEmail String?
+  contactPhone String?
+  primaryColor String   @default("#174EA6")
+  isActive     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  agency       Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+}
+
+model AgencyPackagePurchase {
+  id                       String              @id @default(cuid())
+  agencyId                 String
+  productId                String
+  tier                     String
+  quantity                 Int
+  discountRate             Decimal             @db.Decimal(5, 4)
+  grossAmountVnd           Decimal             @db.Decimal(20, 0)
+  netAmountVnd             Decimal             @db.Decimal(20, 0)
+  commissionSlots          Int
+  remainingCommissionSlots Int
+  status                   AgencyPackageStatus @default(ACTIVE)
+  createdAt                DateTime            @default(now())
+  agency                   Agency              @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  product                  NftProduct          @relation(fields: [productId], references: [id])
+
+  @@index([agencyId, status, createdAt])
+}
+
+model AgencyCommission {
+  id          String           @id @default(cuid())
+  agencyId    String
+  orderId     String           @unique
+  buyerId     String
+  amountVnd   Decimal          @db.Decimal(20, 0)
+  rate        Decimal          @db.Decimal(5, 4)
+  status      CommissionStatus @default(EARNED)
+  createdAt   DateTime         @default(now())
+  paidAt      DateTime?
+  agency      Agency           @relation(fields: [agencyId], references: [id])
+  order       PurchaseOrder    @relation(fields: [orderId], references: [id])
+  buyer       User             @relation("CommissionBuyer", fields: [buyerId], references: [id])
+  ledgerEntry LedgerEntry?
+
+  @@index([agencyId, createdAt])
+}
+
+model AgencyContract {
+  id             String   @id @default(cuid())
+  agencyId       String   @unique
+  contractNumber String   @unique
+  issuedById     String
+  snapshot       Json
+  issuedAt       DateTime @default(now())
+  agency         Agency   @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  issuedBy       User     @relation("ContractIssuer", fields: [issuedById], references: [id])
+}
+
+model AiExpert {
+  id            String           @id @default(cuid())
+  name          String
+  slug          String           @unique
+  specialty     String
+  description   String
+  avatarUrl     String?
+  systemPrompt  String
+  capabilities  Json
+  isActive      Boolean          @default(true)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  conversations AiConversation[]
+}
+
+model AiConversation {
+  id        String               @id @default(cuid())
+  userId    String
+  expertId  String
+  title     String
+  status    AiConversationStatus @default(ACTIVE)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expert    AiExpert             @relation(fields: [expertId], references: [id])
+  messages  AiMessage[]
+
+  @@index([userId, updatedAt])
+}
+
+model AiMessage {
+  id             String          @id @default(cuid())
+  conversationId String
+  role           AiMessageRole
+  kind           AiMessageKind   @default(CHAT)
+  status         AiMessageStatus @default(COMPLETED)
+  content        String
+  attachmentUrl  String?
+  metadata       Json?
+  errorMessage   String?
+  createdAt      DateTime        @default(now())
+  completedAt    DateTime?
+  conversation   AiConversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+model NewsArticle {
+  id          String        @id @default(cuid())
+  title       String
+  slug        String        @unique
+  summary     String
+  content     String
+  imageUrl    String?
+  sourceUrl   String?
+  status      ArticleStatus @default(DRAFT)
+  publishedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([status, publishedAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([entityType, entityId, createdAt])
+}
