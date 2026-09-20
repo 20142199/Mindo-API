@@ -16,11 +16,19 @@ const nav = [
   { label: 'Phân quyền', icon: ShieldCheck, route: 'accounts' as RouteName },
 ];
 
+const routeMeta: Record<RouteName, { title: string; description: string }> = {
+  dashboard: { title: 'Tổng quan', description: 'Trung tâm vận hành Mindo' },
+  kyc: { title: 'Người dùng & KYC', description: 'Xác minh hồ sơ khách hàng' },
+  agencies: { title: 'Đại lý', description: 'Quản lý mạng lưới kinh doanh' },
+  'ai-experts': { title: 'AI chuyên gia', description: 'Cấu hình trợ lý Mindo' },
+  accounts: { title: 'Phân quyền', description: 'Quản trị tài khoản nội bộ' },
+};
+
 export function AppShell({ route, onNavigate, children }: { route: RouteName; onNavigate: (route: RouteName) => void; children: ReactNode }) {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand"><BrandMark /><strong>Mindo Admin</strong></div>
+        <div className="brand"><BrandMark /><span className="brand-copy"><strong>Mindo</strong><small>Admin Portal</small></span></div>
         <nav aria-label="Điều hướng chính">
           {nav.map(({ label, icon: Icon, route: itemRoute }) => (
             <button key={label} className={itemRoute === route ? 'nav-item active' : 'nav-item'} onClick={() => itemRoute && onNavigate(itemRoute)} disabled={!itemRoute}>
@@ -32,8 +40,8 @@ export function AppShell({ route, onNavigate, children }: { route: RouteName; on
       </aside>
       <div className="workspace">
         <header className="topbar">
-          <span />
-          <div className="admin-profile"><Bell size={20} /><span className="avatar">AD</span><span><strong>Admin</strong><small>Quản trị viên</small></span><ChevronDown size={16} /></div>
+          <div className="topbar-copy"><strong>{routeMeta[route].title}</strong><span>{routeMeta[route].description}</span></div>
+          <div className="topbar-actions"><button className="notification-button" aria-label="Thông báo"><Bell size={19} /></button><div className="admin-profile"><span className="avatar">AD</span><span><strong>Admin</strong><small>Quản trị viên</small></span><ChevronDown size={16} /></div></div>
         </header>
         <main>{children}</main>
       </div>
