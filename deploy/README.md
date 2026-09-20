@@ -63,6 +63,20 @@ docker compose --env-file deploy/.env.production -f docker-compose.production.ym
 
 API tự chạy Prisma migration trước khi khởi động. Không tự chạy seed trên production.
 
+## Server đã có Nginx trên cổng 80
+
+Nếu host đang phục vụ nhiều website bằng Nginx hệ thống, không chạy gateway container. Dùng override sau để chỉ expose API/Admin trên loopback:
+
+```bash
+docker compose \
+  --env-file deploy/.env.production \
+  -f docker-compose.production.yml \
+  -f docker-compose.server.yml \
+  up -d --build
+```
+
+Sau đó cài hai file trong `deploy/host-nginx/` vào `/etc/nginx/sites-available/`, tạo symlink tương ứng trong `/etc/nginx/sites-enabled/`, chạy `nginx -t` rồi reload Nginx. API nghe tại `127.0.0.1:4010`, Admin tại `127.0.0.1:4011`; chỉ Nginx hệ thống nhận traffic Internet.
+
 ## Lưu ý bảo mật
 
 Flexible chỉ mã hóa từ người dùng đến Cloudflare; đoạn Cloudflare → origin vẫn là HTTP. Với hệ thống có đăng nhập và eKYC, nên chuyển sang Full (strict) cùng Cloudflare Origin Certificate khi có thể, đồng thời giới hạn firewall origin chỉ nhận traffic từ Cloudflare.

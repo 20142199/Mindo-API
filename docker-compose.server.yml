@@ -1,0 +1,12 @@
+services:
+  api:
+    ports:
+      - "127.0.0.1:4010:4000"
+
+  admin:
+    ports:
+      - "127.0.0.1:4011:80"
+
+  gateway:
+    profiles:
+      - bundled-gateway
