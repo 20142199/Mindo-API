@@ -88,6 +88,13 @@ The local seed creates these development-only accounts:
 
 Change or remove these credentials before any shared environment is exposed.
 
+## Production domains
+
+- Admin: `https://admin-mindo.stg-studio.com`
+- API: `https://api-mindo.stg-studio.com`
+
+The production Docker setup exposes only HTTP port 80 at the origin and relies on Cloudflare for public HTTPS. See [`deploy/README.md`](deploy/README.md) for DNS, environment, build, health-check, and rollout instructions.
+
 ## Internal NFT ownership
 
 Mindo does not connect NFT ownership to a blockchain. After a successful VND balance purchase, the API atomically deducts the buyer balance, issues one unique `assetCode` per NFT, updates inventory, records the ledger entry, and credits any agency commission. NFT ownership is read from the Mindo database and does not require a crypto wallet, RPC endpoint, smart contract, gas fee, or private key.

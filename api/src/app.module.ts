@@ -12,6 +12,7 @@ import { FriendModule } from './friend/friend.module';
 import { HistoryModule } from './history/history.module';
 import { Phase1Module } from './phase1/phase1.module';
 import { Phase2Module } from './phase2/phase2.module';
+import { HealthController } from './health.controller';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { Phase2Module } from './phase2/phase2.module';
     HistoryModule,
     Phase2Module,
   ],
+  controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

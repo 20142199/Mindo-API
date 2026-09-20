@@ -1,0 +1,13 @@
+.git
+.gitignore
+node_modules
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+.env
+.env.*
+!.env.example
+!deploy/.env.production.example
+coverage
+api/storage
+contracts

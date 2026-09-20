@@ -2,17 +2,20 @@ import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  app.set('trust proxy', 1);
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
   );
 
   const origins = (process.env.CORS_ORIGINS ?? 'http://localhost:5173')
     .split(',')
-    .map((value) => value.trim());
+    .map((value) => value.trim())
+    .filter(Boolean);
   app.enableCors({ origin: origins, credentials: true });
 
   const swagger = new DocumentBuilder()
@@ -23,7 +26,8 @@ async function bootstrap() {
     .build();
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swagger));
 
-  await app.listen(Number(process.env.PORT ?? 4000));
+  app.enableShutdownHooks();
+  await app.listen(Number(process.env.PORT ?? 4000), '0.0.0.0');
 }
 
 void bootstrap();

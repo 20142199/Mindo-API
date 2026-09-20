@@ -10,3 +10,4 @@ contracts/artifacts
 contracts/typechain-types
 contracts/
 api/storage
+deploy/.env.production
