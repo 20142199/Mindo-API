@@ -84,7 +84,7 @@ export class AuthService {
   async login(dto: LoginDto, allowedRoles?: UserRole[], context: SessionContext = {}) {
     const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (user?.loginRateLimitEnabled && user.loginLockedUntil && user.loginLockedUntil > new Date()) {
-      throw new HttpException('Tài khoản tạm khóa do đăng nhập sai nhiều lần. Vui lòng thử lại sau', HttpStatus.TOO_MANY_REQUESTS);
+      throw new HttpException({ message: 'Tài khoản tạm khóa do đăng nhập sai nhiều lần. Vui lòng thử lại sau', code: 'AUTH_ACCOUNT_LOCKED' }, HttpStatus.TOO_MANY_REQUESTS);
     }
     const passwordValid = user ? await bcrypt.compare(dto.password, user.passwordHash) : false;
     if (!user || user.status !== 'ACTIVE' || !passwordValid) {
@@ -101,11 +101,11 @@ export class AuthService {
           },
         });
       }
-      throw new UnauthorizedException('Email hoặc mật khẩu không đúng');
+      throw new UnauthorizedException({ message: 'Email hoặc mật khẩu không đúng', code: 'AUTH_INVALID_CREDENTIALS' });
     }
-    if (allowedRoles && !allowedRoles.includes(user.role)) throw new UnauthorizedException('Không phải tài khoản quản trị');
+    if (allowedRoles && !allowedRoles.includes(user.role)) throw new UnauthorizedException({ message: 'Không phải tài khoản quản trị', code: 'AUTH_NOT_ADMIN' });
     if (user.role === UserRole.INVESTOR && !user.emailVerifiedAt) {
-      throw new ForbiddenException('Vui lòng xác thực email trước khi đăng nhập');
+      throw new ForbiddenException({ message: 'Vui lòng xác thực email trước khi đăng nhập', code: 'AUTH_EMAIL_NOT_VERIFIED' });
     }
     if (user.failedLoginAttempts || user.loginLockedUntil) {
       await this.prisma.user.update({ where: { id: user.id }, data: { failedLoginAttempts: 0, loginLockedUntil: null } });
@@ -120,22 +120,24 @@ export class AuthService {
   }
 
   async register(dto: RegisterDto) {
-    if (dto.password !== dto.confirm_password) throw new BadRequestException('Xác nhận mật khẩu không khớp');
+    if (dto.password !== dto.confirm_password) throw new BadRequestException({ message: 'Xác nhận mật khẩu không khớp', code: 'AUTH_CONFIRM_MISMATCH' });
     const email = dto.email;
-    if (await this.prisma.user.findUnique({ where: { email } })) throw new ConflictException('Email đã tồn tại');
+    if (await this.prisma.user.findUnique({ where: { email } })) throw new ConflictException({ message: 'Email đã tồn tại', code: 'AUTH_EMAIL_TAKEN' });
     let referredById: string | undefined;
     let systemCodeId: string | undefined;
     if (dto.ref_by?.trim()) {
       const code = dto.ref_by.trim();
       const systemCode = await this.prisma.systemReferralCode.findUnique({ where: { code: code.toUpperCase() } });
       if (systemCode) {
-        if (!systemCode.isActive || systemCode.claimedById) throw new BadRequestException('Mã đầu nhánh đã hết hiệu lực hoặc đã được sử dụng');
+        if (!systemCode.isActive || systemCode.claimedById) {
+          throw new BadRequestException({ message: 'Mã đầu nhánh đã hết hiệu lực hoặc đã được sử dụng', code: 'AUTH_SYSTEM_CODE_INVALID' });
+        }
         systemCodeId = systemCode.id;
       } else {
         const referrer = await this.prisma.user.findFirst({ where: { referralCode: { equals: code, mode: 'insensitive' } } });
         const agency = referrer ? null : await this.prisma.agency.findUnique({ where: { code: code.toUpperCase() } });
         referredById = referrer?.id ?? agency?.userId;
-        if (!referredById) throw new BadRequestException('Mã giới thiệu không hợp lệ');
+        if (!referredById) throw new BadRequestException({ message: 'Mã giới thiệu không hợp lệ', code: 'AUTH_REFERRAL_INVALID' });
       }
     }
     const fullName = dto.full_name.trim();
@@ -159,13 +161,13 @@ export class AuthService {
             where: { id: systemCodeId, isActive: true, claimedById: null },
             data: { claimedById: created.id, claimedAt: new Date(), isActive: false },
           });
-          if (claimed.count !== 1) throw new BadRequestException('Mã đầu nhánh đã được sử dụng');
+          if (claimed.count !== 1) throw new BadRequestException({ message: 'Mã đầu nhánh đã được sử dụng', code: 'AUTH_SYSTEM_CODE_TAKEN' });
         }
         return created;
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException('Email hoặc mã giới thiệu đã tồn tại');
+        throw new ConflictException({ message: 'Email hoặc mã giới thiệu đã tồn tại', code: 'AUTH_REGISTER_CONFLICT' });
       }
       throw error;
     }
@@ -185,11 +187,34 @@ export class AuthService {
     return { user: userView(user), verification_required: true, otp: otpDelivery };
   }
 
+  /**
+   * The same response whether or not the email exists.
+   *
+   * Used by every public entry point that sends an OTP. Leaking the difference
+   * would let anyone run a list of addresses and learn which ones are
+   * registered — a map of the system's users.
+   */
+  private otpSilentOk() {
+    const expiryMinutes = Number(process.env.OTP_TTL_MINUTES ?? 5);
+    const cooldownSeconds = Number(process.env.OTP_RESEND_COOLDOWN_SECONDS ?? 60);
+    return {
+      sent: true,
+      delivery: 'email',
+      expires_in: expiryMinutes * 60,
+      resend_available_in: cooldownSeconds,
+    };
+  }
+
   async requestOtp(emailValue: string, purpose: 'register' | 'reset') {
     const email = emailValue.toLowerCase();
     const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user) throw new BadRequestException('Email không tồn tại');
-    if (purpose === 'register' && user.emailVerifiedAt) throw new BadRequestException('Email đã được xác thực');
+    /*
+      Do NOT reveal whether the email exists or is already verified — see
+      `otpSilentOk`. A real user who has just registered certainly has one, so
+      staying silent costs the normal flow nothing.
+    */
+    if (!user) return this.otpSilentOk();
+    if (purpose === 'register' && user.emailVerifiedAt) return this.otpSilentOk();
     const cooldownSeconds = Number(process.env.OTP_RESEND_COOLDOWN_SECONDS ?? 60);
     const recent = await this.prisma.verificationCode.findFirst({
       where: {
@@ -200,7 +225,12 @@ export class AuthService {
       },
       orderBy: { createdAt: 'desc' },
     });
-    if (recent) throw new HttpException(`Vui lòng chờ ${cooldownSeconds} giây trước khi gửi lại OTP`, HttpStatus.TOO_MANY_REQUESTS);
+    if (recent) {
+      throw new HttpException(
+        { message: `Vui lòng chờ ${cooldownSeconds} giây trước khi gửi lại OTP`, code: 'AUTH_OTP_COOLDOWN' },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
 
     const otp = randomInt(100000, 1000000).toString();
     const expiryMinutes = Number(process.env.OTP_TTL_MINUTES ?? 5);
@@ -230,24 +260,16 @@ export class AuthService {
   }
 
   async requestPasswordReset(email: string) {
-    const expiryMinutes = Number(process.env.OTP_TTL_MINUTES ?? 5);
-    const cooldownSeconds = Number(process.env.OTP_RESEND_COOLDOWN_SECONDS ?? 60);
     const user = await this.prisma.user.findUnique({ where: { email } });
-    if (!user || user.status !== 'ACTIVE') {
-      return {
-        sent: true,
-        delivery: 'email',
-        expires_in: expiryMinutes * 60,
-        resend_available_in: cooldownSeconds,
-      };
-    }
+    /* A non-ACTIVE account stays silent too — see `otpSilentOk`. */
+    if (!user || user.status !== 'ACTIVE') return this.otpSilentOk();
     return this.requestOtp(email, 'reset');
   }
 
   async verifyPasswordResetOtp(dto: VerifyOtpDto) {
     await this.consumeOtp(dto, 'reset');
     const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (!user || user.status !== 'ACTIVE') throw new BadRequestException('OTP không hợp lệ hoặc đã hết hạn');
+    if (!user || user.status !== 'ACTIVE') throw new BadRequestException({ message: 'OTP không hợp lệ hoặc đã hết hạn', code: 'AUTH_OTP_INVALID' });
 
     const resetToken = randomBytes(32).toString('base64url');
     const ttlMinutes = Math.max(1, Number(process.env.PASSWORD_RESET_TOKEN_TTL_MINUTES ?? 10));
@@ -269,14 +291,14 @@ export class AuthService {
       where: { email: dto.email, purpose, consumedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
     });
-    if (!row) throw new BadRequestException('OTP không hợp lệ hoặc đã hết hạn');
+    if (!row) throw new BadRequestException({ message: 'OTP không hợp lệ hoặc đã hết hạn', code: 'AUTH_OTP_INVALID' });
     if (row.codeHash !== hashToken(dto.otp)) {
       const attempts = row.attempts + 1;
       await this.prisma.verificationCode.update({
         where: { id: row.id },
         data: { attempts, consumedAt: attempts >= Number(process.env.OTP_MAX_ATTEMPTS ?? 5) ? new Date() : undefined },
       });
-      throw new BadRequestException('OTP không hợp lệ hoặc đã hết hạn');
+      throw new BadRequestException({ message: 'OTP không hợp lệ hoặc đã hết hạn', code: 'AUTH_OTP_INVALID' });
     }
     await this.prisma.verificationCode.updateMany({
       where: { email: dto.email, purpose, consumedAt: null },
@@ -285,12 +307,12 @@ export class AuthService {
   }
 
   async resetPassword(dto: ResetPasswordDto) {
-    if (dto.new_password !== dto.confirm_password) throw new BadRequestException('Xác nhận mật khẩu không khớp');
+    if (dto.new_password !== dto.confirm_password) throw new BadRequestException({ message: 'Xác nhận mật khẩu không khớp', code: 'AUTH_CONFIRM_MISMATCH' });
     const ticket = await this.prisma.passwordResetTicket.findUnique({
       where: { tokenHash: hashToken(dto.reset_token) },
     });
     if (!ticket || ticket.usedAt || ticket.expiresAt <= new Date()) {
-      throw new BadRequestException('Phiên đặt lại mật khẩu không hợp lệ hoặc đã hết hạn');
+      throw new BadRequestException({ message: 'Phiên đặt lại mật khẩu không hợp lệ hoặc đã hết hạn', code: 'AUTH_RESET_TICKET_INVALID' });
     }
 
     const now = new Date();
@@ -300,7 +322,7 @@ export class AuthService {
         where: { id: ticket.id, usedAt: null, expiresAt: { gt: now } },
         data: { usedAt: now },
       });
-      if (claimed.count !== 1) throw new BadRequestException('Phiên đặt lại mật khẩu không hợp lệ hoặc đã hết hạn');
+      if (claimed.count !== 1) throw new BadRequestException({ message: 'Phiên đặt lại mật khẩu không hợp lệ hoặc đã hết hạn', code: 'AUTH_RESET_TICKET_INVALID' });
       await tx.user.update({ where: { id: ticket.userId }, data: { passwordHash } });
       await tx.refreshToken.updateMany({ where: { userId: ticket.userId, revokedAt: null }, data: { revokedAt: now } });
     });
@@ -308,9 +330,17 @@ export class AuthService {
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto) {
+    if (dto.new_password !== dto.confirm_password) {
+      throw new BadRequestException({ message: 'Xác nhận mật khẩu không khớp', code: 'AUTH_CONFIRM_MISMATCH' });
+    }
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
-    if (!(await bcrypt.compare(dto.old_password, user.passwordHash))) throw new BadRequestException('Mật khẩu hiện tại không đúng');
-    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash: await bcrypt.hash(dto.password, 12) } });
+    if (!(await bcrypt.compare(dto.old_password, user.passwordHash))) {
+      throw new BadRequestException({ message: 'Mật khẩu hiện tại không đúng', code: 'AUTH_CURRENT_PASSWORD_WRONG' });
+    }
+    if (dto.new_password === dto.old_password) {
+      throw new BadRequestException({ message: 'Mật khẩu mới phải khác mật khẩu hiện tại', code: 'AUTH_PASSWORD_UNCHANGED' });
+    }
+    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash: await bcrypt.hash(dto.new_password, 12) } });
     return { changed: true };
   }
 
@@ -319,13 +349,13 @@ export class AuthService {
     try {
       payload = await this.jwt.verifyAsync(dto.refresh_token, { secret: process.env.JWT_REFRESH_SECRET });
     } catch {
-      throw new UnauthorizedException('Refresh token không hợp lệ');
+      throw new UnauthorizedException({ message: 'Refresh token không hợp lệ', code: 'AUTH_REFRESH_INVALID' });
     }
     const stored = await this.prisma.refreshToken.findUnique({ where: { tokenHash: hashToken(dto.refresh_token) } });
-    if (!stored || stored.revokedAt || stored.expiresAt <= new Date()) throw new UnauthorizedException('Refresh token đã hết hiệu lực');
+    if (!stored || stored.revokedAt || stored.expiresAt <= new Date()) throw new UnauthorizedException({ message: 'Refresh token đã hết hiệu lực', code: 'AUTH_REFRESH_REVOKED' });
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: payload.sub } });
     if (user.status !== 'ACTIVE' || (user.role === UserRole.INVESTOR && !user.emailVerifiedAt)) {
-      throw new UnauthorizedException('Tài khoản không còn hiệu lực');
+      throw new UnauthorizedException({ message: 'Tài khoản không còn hiệu lực', code: 'AUTH_ACCOUNT_INACTIVE' });
     }
     return this.issueTokens(user, context, stored.id);
   }
