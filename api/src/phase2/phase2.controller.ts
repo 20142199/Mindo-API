@@ -1,18 +1,20 @@
 import { Body, Controller, Delete, Get, Headers, MessageEvent, Param, Patch, Post, Query, Req, Res, Sse, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { AgencyStatus, UserRole } from '@prisma/client';
+import { AgencyStatus, AiMessageStatus, UserRole } from '@prisma/client';
 import type { Response } from 'express';
-import { from, interval, map, startWith, switchMap } from 'rxjs';
+import { distinctUntilChanged, from, interval, map, startWith, switchMap, takeWhile } from 'rxjs';
 import { AuthenticatedRequest, JwtAuthGuard, Roles, authUser } from '../auth/auth.guard';
 import { ok } from '../common/api-response';
 import { AgencyService } from './agency.service';
 import { AiService } from './ai.service';
 import {
+  AiConversationQueryDto,
   BuyAgencyPackageDto,
   CreateAdminAccountDto,
   CreateAgencyApplicationDto,
   CreateAiConversationDto,
   CreateAiMessageDto,
+  RenameAiConversationDto,
   ResetAdminPasswordDto,
   ReviewAgencyDto,
   UpdateAdminRoleDto,
@@ -64,11 +66,32 @@ export class Phase2Controller {
   }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('investor/ai/conversations')
-  conversations(@Req() req: AuthenticatedRequest) { return this.ai.listConversations(authUser(req).id).then((data) => ok(data)); }
+  conversations(@Req() req: AuthenticatedRequest, @Query() query: AiConversationQueryDto) {
+    return this.ai
+      .listConversations(authUser(req).id, query)
+      .then(({ data, extra }) => ok(data, 'Thành công', extra));
+  }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('investor/ai/conversations/:id')
   conversation(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
     return this.ai.getConversation(authUser(req).id, id).then((data) => ok(data));
+  }
+
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Patch('investor/ai/conversations/:id')
+  renameConversation(@Req() req: AuthenticatedRequest, @Param('id') id: string, @Body() dto: RenameAiConversationDto) {
+    return this.ai.renameConversation(authUser(req).id, id, dto.title).then((data) => ok(data, 'Đã đổi tên cuộc trò chuyện'));
+  }
+
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Delete('investor/ai/conversations/:id')
+  deleteConversation(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+    return this.ai.removeConversation(authUser(req).id, id).then((data) => ok(data, 'Đã xóa cuộc trò chuyện'));
+  }
+
+  /* Đặt TRƯỚC `conversations/:id` thì không cần, vì đây là đường khác hẳn —
+     nhưng để cạnh nhóm AI cho dễ đọc. */
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('investor/ai/usage')
+  aiUsage(@Req() req: AuthenticatedRequest) {
+    return this.ai.usage(authUser(req).id).then((data) => ok(data));
   }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Post('investor/ai/conversations/:id/messages')
@@ -76,12 +99,34 @@ export class Phase2Controller {
     return this.ai.sendMessage(authUser(req).id, id, dto).then((data) => ok(data, 'Đang xử lý yêu cầu AI'));
   }
 
+  /**
+   * Theo dõi một hội thoại tới khi AI trả lời xong.
+   *
+   * Vẫn là polling 1 giây, nhưng có hai cái van:
+   *
+   * `distinctUntilChanged` — không đẩy khung giống hệt khung trước. Đo ngày
+   *   23/09/2026: hội thoại 2 tin đã xong đẩy 10 khung trong 10 giây, cả 10
+   *   giống hệt nhau, mỗi khung 1.739 byte. Toàn bộ là lặp lại.
+   *
+   * `takeWhile(..., true)` — dừng khi không còn tin nào PENDING. Tham số thứ
+   *   hai là `inclusive`: khung CUỐI (khung báo đã xong) vẫn được gửi rồi mới
+   *   đóng. Thiếu nó thì client chờ mãi khung không bao giờ tới.
+   *
+   * Trước hai van này, một người mở màn chat rồi bỏ đó là 86.400 truy vấn
+   * database mỗi ngày để nói cùng một điều.
+   *
+   * CHƯA PHẢI ĐÍCH CUỐI: vẫn gửi TOÀN BỘ hội thoại mỗi lần đổi, không gửi
+   * riêng phần thay đổi. Hội thoại càng dài khung càng phình. Muốn dứt điểm
+   * thì `ai.processor` phải bắn sự kiện qua Redis pub/sub và bỏ hẳn polling.
+   */
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Sse('investor/ai/conversations/:id/events')
   conversationEvents(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
     const userId = authUser(req).id;
     return interval(1_000).pipe(
       startWith(0),
       switchMap(() => from(this.ai.getConversation(userId, id))),
+      distinctUntilChanged((a, b) => JSON.stringify(a) === JSON.stringify(b)),
+      takeWhile((data) => data.messages.some((m) => m.status === AiMessageStatus.PENDING), true),
       map((data): MessageEvent => ({ data })),
     );
   }
