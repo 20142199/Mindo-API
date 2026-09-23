@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { AiMessageKind, AiMessageRole, AiMessageStatus, Prisma } from '@prisma/client';
 import { Queue } from 'bullmq';
@@ -10,6 +10,8 @@ import { AiConversationQueryDto, CreateAiConversationDto, CreateAiMessageDto, Up
 
 @Injectable()
 export class AiService {
+  private readonly logger = new Logger(AiService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly provider: AiProviderService,
@@ -149,7 +151,33 @@ export class AiService {
       await tx.aiConversation.update({ where: { id: conversationId }, data: { ...(title ? { title } : {}), updatedAt: new Date() } });
       return { user_message: userMessage, assistant_message: assistantMessage };
     });
-    await this.queue.add('generate', { messageId: result.assistant_message.id }, { jobId: result.assistant_message.id, attempts: 3, backoff: { type: 'exponential', delay: 2_000 }, removeOnComplete: 500 });
+    /*
+      Xếp hàng đợi nằm NGOÀI transaction, nên tới đây hai tin đã nằm trong
+      CSDL rồi. Trước đây lỗi ở dòng này bay thẳng ra ngoài thành 500 và bỏ
+      lại một tin `PENDING` không ai xử lý: app mở lại hội thoại là thấy ba
+      chấm quay mãi, còn `SSE /events` thì hỏi CSDL mỗi giây cho tới khi
+      người dùng bỏ đi — vì nó chỉ đóng khi không còn tin `PENDING` nào.
+
+      Nên hỏng ở đây phải tự dọn: đánh dấu `FAILED` để hội thoại có kết cục,
+      rồi mới báo lỗi. Người dùng thấy một câu trả lời hỏng có thể gửi lại,
+      thay vì một ô chờ không bao giờ xong.
+    */
+    try {
+      await this.queue.add('generate', { messageId: result.assistant_message.id }, { jobId: result.assistant_message.id, attempts: 3, backoff: { type: 'exponential', delay: 2_000 }, removeOnComplete: 500 });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'Không xếp được hàng đợi AI';
+      this.logger.error(`Không xếp được việc AI cho tin ${result.assistant_message.id}: ${reason}`);
+      await this.prisma.aiMessage.update({
+        where: { id: result.assistant_message.id },
+        data: { status: AiMessageStatus.FAILED, errorMessage: reason, completedAt: new Date() },
+      });
+      /* Gắn `code` vì 503 ở đây khác hẳn 503 của nhà cung cấp AI: lần này
+         chưa có gì được gửi đi, gửi lại là chạy ngay khi hàng đợi sống lại. */
+      throw new ServiceUnavailableException({
+        message: 'Trợ lý AI tạm thời không nhận thêm yêu cầu, vui lòng thử lại',
+        code: 'AI_QUEUE_UNAVAILABLE',
+      });
+    }
     return result;
   }
 

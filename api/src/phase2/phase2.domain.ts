@@ -81,3 +81,24 @@ export function buildAgencyTree<T extends { id: string; parentId: string | null 
   const roots = rows.filter((row) => !row.parentId || !knownIds.has(row.parentId));
   return roots.flatMap((row) => visit(row, new Set()));
 }
+
+/**
+ * Trần thời gian sống của `SSE /ai/conversations/:id/events`.
+ *
+ * Dòng sự kiện đó đóng theo MỘT điều kiện duy nhất: không còn tin nào
+ * `PENDING`. Điều kiện ấy đúng trong mọi trường hợp bình thường, nhưng nó
+ * chưa phải là một điểm dừng — nếu có tin kẹt ở `PENDING` (worker chết giữa
+ * chừng, job mất khỏi hàng đợi) thì không còn gì kết thúc vòng lặp, và nó đọc
+ * lại cả hội thoại mỗi giây suốt thời gian client còn nối.
+ *
+ * Nên đặt thêm một cái trần. 3 phút là trần chống rò, không phải hạn xử lý:
+ * app đã tự bỏ cuộc ở 90 giây, nên đường này chỉ chạm tới khi có gì đó thực
+ * sự hỏng.
+ */
+export const DEFAULT_SSE_MAX_STREAM_MS = 180_000;
+export const MIN_SSE_MAX_STREAM_MS = 30_000;
+
+export function resolveSseMaxStreamMs(raw: string | undefined) {
+  const value = Number(raw ?? DEFAULT_SSE_MAX_STREAM_MS);
+  return Number.isFinite(value) && value >= MIN_SSE_MAX_STREAM_MS ? value : DEFAULT_SSE_MAX_STREAM_MS;
+}

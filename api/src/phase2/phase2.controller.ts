@@ -2,11 +2,12 @@ import { Body, Controller, Delete, Get, Headers, MessageEvent, Param, Patch, Pos
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AgencyStatus, AiMessageStatus, UserRole } from '@prisma/client';
 import type { Response } from 'express';
-import { distinctUntilChanged, from, interval, map, startWith, switchMap, takeWhile } from 'rxjs';
+import { distinctUntilChanged, from, interval, map, startWith, switchMap, takeUntil, takeWhile, timer } from 'rxjs';
 import { AuthenticatedRequest, JwtAuthGuard, Roles, authUser } from '../auth/auth.guard';
 import { ok } from '../common/api-response';
 import { AgencyService } from './agency.service';
 import { AiService } from './ai.service';
+import { resolveSseMaxStreamMs } from './phase2.domain';
 import {
   AiConversationQueryDto,
   BuyAgencyPackageDto,
@@ -24,6 +25,8 @@ import {
 } from './phase2.dto';
 
 const adminRoles = [UserRole.ADMIN, UserRole.COMPLIANCE, UserRole.FINANCE];
+
+const AI_SSE_MAX_STREAM_MS = resolveSseMaxStreamMs(process.env.AI_SSE_MAX_STREAM_MS);
 
 @ApiTags('Phase 2')
 @Controller('api/v1')
@@ -128,6 +131,10 @@ export class Phase2Controller {
       distinctUntilChanged((a, b) => JSON.stringify(a) === JSON.stringify(b)),
       takeWhile((data) => data.messages.some((m) => m.status === AiMessageStatus.PENDING), true),
       map((data): MessageEvent => ({ data })),
+      /* Trần chống rò: `takeWhile` ở trên chỉ đóng khi tin hết `PENDING`, nên
+         một tin kẹt `PENDING` sẽ giữ vòng lặp 1 giây/lần chạy mãi. Xem
+         `resolveSseMaxStreamMs` để biết vì sao 3 phút. */
+      takeUntil(timer(AI_SSE_MAX_STREAM_MS)),
     );
   }
 

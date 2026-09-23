@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { agencyTierForTotal, buildAgencyTree, priceAgencyPackages, slugifyStoreName } from './phase2.domain';
+import {
+  agencyTierForTotal,
+  buildAgencyTree,
+  priceAgencyPackages,
+  resolveSseMaxStreamMs,
+  slugifyStoreName,
+} from './phase2.domain';
 
 describe('phase 2 domain rules', () => {
   it('maps cumulative package totals to the three agency titles', () => {
@@ -30,5 +36,31 @@ describe('phase 2 domain rules', () => {
     ]);
     expect(tree).toHaveLength(1);
     expect((tree[0].children[0] as { children: unknown[] }).children).toHaveLength(1);
+  });
+});
+
+/**
+ * Safety net for the SSE stream ceiling (2026-09-24).
+ *
+ * The floor matters more than the default here: a ceiling of a second or two
+ * would close every stream before the first answer ever arrived, and it would
+ * look exactly like the AI being broken rather than like a bad setting.
+ */
+describe('SSE stream ceiling', () => {
+  it('falls back to three minutes when unset', () => {
+    expect(resolveSseMaxStreamMs(undefined)).toBe(180_000);
+  });
+
+  it('accepts a longer ceiling', () => {
+    expect(resolveSseMaxStreamMs('600000')).toBe(600_000);
+  });
+
+  it('refuses anything under the 30s floor', () => {
+    expect(resolveSseMaxStreamMs('1000')).toBe(180_000);
+    expect(resolveSseMaxStreamMs('0')).toBe(180_000);
+  });
+
+  it('refuses a value that is not a number', () => {
+    expect(resolveSseMaxStreamMs('forever')).toBe(180_000);
   });
 });
