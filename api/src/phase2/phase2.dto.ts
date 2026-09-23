@@ -1,5 +1,5 @@
 import { AgencyStatus, AiMessageKind, UserRole } from '@prisma/client';
-import { IsArray, IsBoolean, IsEmail, IsEnum, IsHexColor, IsInt, IsNumber, IsOptional, IsString, IsUrl, Max, Min, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsEnum, IsHexColor, IsInt, IsNumber, IsOptional, IsString, IsUrl, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class CreateAgencyApplicationDto {
   @IsString() @MinLength(2) business_name!: string;
@@ -52,6 +52,10 @@ export class ResetAdminPasswordDto {
 export class CreateAiConversationDto {
   @IsString() expert_id!: string;
   @IsOptional() @IsString() title?: string;
+}
+
+export class RenameAiConversationDto {
+  @IsString() @MinLength(1) @MaxLength(120) title!: string;
 }
 
 export class CreateAiMessageDto {

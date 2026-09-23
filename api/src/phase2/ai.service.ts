@@ -29,6 +29,41 @@ export class AiService {
     });
   }
 
+  /**
+   * Trần yêu cầu AI mỗi ngày.
+   *
+   * Đọc một chỗ duy nhất vì HAI nơi cần: `sendMessage` để chặn, và `usage` để
+   * app biết trước còn bao nhiêu lượt. Trước đây con số này nằm inline trong
+   * `sendMessage`, nên thêm endpoint `usage` mà quên sửa là hai nơi lệch nhau.
+   */
+  private dailyLimit() {
+    return Number(process.env.AI_DAILY_MESSAGE_LIMIT ?? 50);
+  }
+
+  /** Mốc 0h hôm nay — cửa sổ tính quota trùng với ngày theo giờ máy chủ */
+  private static startOfToday() {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  /** Số yêu cầu đã dùng hôm nay, đếm theo tin của NGƯỜI DÙNG trên mọi hội thoại */
+  private countUsedToday(userId: string) {
+    return this.prisma.aiMessage.count({
+      where: { conversation: { userId }, role: AiMessageRole.USER, createdAt: { gte: AiService.startOfToday() } },
+    });
+  }
+
+  /**
+   * Quota còn lại. App gọi lúc mở màn chat để chặn TRƯỚC khi người dùng gõ,
+   * thay vì để họ soạn xong rồi mới báo hết lượt.
+   */
+  async usage(userId: string) {
+    const limit = this.dailyLimit();
+    const used = await this.countUsedToday(userId);
+    return { used, limit, remaining: Math.max(0, limit - used) };
+  }
+
   listConversations(userId: string) {
     return this.prisma.aiConversation.findMany({
       where: { userId },
@@ -53,10 +88,22 @@ export class AiService {
     const capabilities = Array.isArray(conversation.expert.capabilities) ? conversation.expert.capabilities.map(String) : [];
     if (!capabilities.includes(kind)) throw new BadRequestException('Chuyên gia này không hỗ trợ loại yêu cầu đã chọn');
     if (kind === AiMessageKind.TRANSLATION && !dto.target_language?.trim()) throw new BadRequestException('Cần chọn ngôn ngữ đích');
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-    const dailyUsed = await this.prisma.aiMessage.count({ where: { conversation: { userId }, role: AiMessageRole.USER, createdAt: { gte: dayStart } } });
-    if (dailyUsed >= Number(process.env.AI_DAILY_MESSAGE_LIMIT ?? 50)) throw new BadRequestException('Đã đạt giới hạn yêu cầu AI trong ngày');
+    const limit = this.dailyLimit();
+    const dailyUsed = await this.countUsedToday(userId);
+    /*
+      Gắn `code` chứ không chỉ có câu chữ: app phải phân biệt lỗi này với mọi
+      lỗi 400 khác để mở đúng màn "hết lượt" thay vì thẻ lỗi đỏ. Trước đây app
+      phải dò chữ "giới hạn" trong thông báo tiếng Việt — sửa chính tả một cái
+      là hỏng.
+    */
+    if (dailyUsed >= limit) {
+      throw new BadRequestException({
+        message: `Đã đạt giới hạn ${limit} yêu cầu AI trong ngày`,
+        code: 'AI_DAILY_LIMIT_REACHED',
+        used: dailyUsed,
+        limit,
+      });
+    }
     const result = await this.prisma.$transaction(async (tx) => {
       const userMessage = await tx.aiMessage.create({
         data: {
@@ -85,6 +132,38 @@ export class AiService {
     });
     await this.queue.add('generate', { messageId: result.assistant_message.id }, { jobId: result.assistant_message.id, attempts: 3, backoff: { type: 'exponential', delay: 2_000 }, removeOnComplete: 500 });
     return result;
+  }
+
+  /**
+   * Đổi tên hội thoại.
+   *
+   * `getConversation` chạy trước để chặn việc đổi tên hội thoại của người
+   * khác: nó lọc theo `userId` và ném 404 nếu không khớp. Không có bước đó thì
+   * `update({where: {id}})` sẽ đổi được bất kỳ hội thoại nào chỉ cần biết id.
+   */
+  async renameConversation(userId: string, id: string, title: string) {
+    await this.getConversation(userId, id);
+    const clean = title.trim();
+    if (!clean) throw new BadRequestException('Tên cuộc trò chuyện không được để trống');
+    return this.prisma.aiConversation.update({
+      where: { id },
+      data: { title: clean },
+      include: { expert: true, messages: { orderBy: { createdAt: 'desc' }, take: 1 } },
+    });
+  }
+
+  /**
+   * Xoá hội thoại. Tin nhắn đi theo nhờ `onDelete: Cascade` khai trong
+   * `schema.prisma`, không phải xoá tay.
+   *
+   * Job đang chạy dở trong BullMQ vẫn sẽ chạy tiếp rồi hỏng lúc ghi kết quả
+   * (không còn hội thoại) — chấp nhận được, `ai.processor` đã có `attempts: 3`
+   * và job hỏng không ảnh hưởng gì tới người dùng.
+   */
+  async removeConversation(userId: string, id: string) {
+    await this.getConversation(userId, id);
+    await this.prisma.aiConversation.delete({ where: { id } });
+    return { id, deleted: true };
   }
 
   async processMessage(messageId: string) {
