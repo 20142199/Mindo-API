@@ -2,10 +2,11 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectQueue } from '@nestjs/bullmq';
 import { AiMessageKind, AiMessageRole, AiMessageStatus, Prisma } from '@prisma/client';
 import { Queue } from 'bullmq';
+import { pageExtra } from '../common/api-response';
 import { PrismaService } from '../common/prisma.module';
 import { FileStorageService } from '../phase1/file-storage.service';
 import { AiProviderService } from './ai-provider.service';
-import { CreateAiConversationDto, CreateAiMessageDto, UpsertAiExpertDto } from './phase2.dto';
+import { AiConversationQueryDto, CreateAiConversationDto, CreateAiMessageDto, UpsertAiExpertDto } from './phase2.dto';
 
 @Injectable()
 export class AiService {
@@ -64,12 +65,30 @@ export class AiService {
     return { used, limit, remaining: Math.max(0, limit - used) };
   }
 
-  listConversations(userId: string) {
-    return this.prisma.aiConversation.findMany({
-      where: { userId },
-      include: { expert: true, messages: { orderBy: { createdAt: 'desc' }, take: 1 } },
-      orderBy: { updatedAt: 'desc' },
-    });
+  /**
+   * Danh sách hội thoại, MỚI NHẤT TRƯỚC, có phân trang.
+   *
+   * `messages` cố tình chỉ lấy MỘT tin gần nhất — app chỉ cần nó để suy ra
+   * loại phiên (icon ở dòng danh sách). Kéo cả cây tin nhắn ở đây là thừa.
+   *
+   * Sắp xếp thêm `id` sau `updatedAt`: hai hội thoại có cùng mốc `updatedAt`
+   * (hay gặp khi tạo hàng loạt lúc test) mà không có khoá phụ thì thứ tự giữa
+   * các trang không ổn định — một dòng có thể xuất hiện ở cả trang 1 lẫn
+   * trang 2, hoặc biến mất hẳn.
+   */
+  async listConversations(userId: string, query: AiConversationQueryDto) {
+    const where = { userId };
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.aiConversation.count({ where }),
+      this.prisma.aiConversation.findMany({
+        where,
+        include: { expert: true, messages: { orderBy: { createdAt: 'desc' }, take: 1 } },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      }),
+    ]);
+    return { data: rows, extra: pageExtra(query.page, query.limit, total) };
   }
 
   async getConversation(userId: string, id: string) {

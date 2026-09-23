@@ -1,3 +1,4 @@
+import { Type } from 'class-transformer';
 import { AgencyStatus, AiMessageKind, UserRole } from '@prisma/client';
 import { IsArray, IsBoolean, IsEmail, IsEnum, IsHexColor, IsInt, IsNumber, IsOptional, IsString, IsUrl, Max, MaxLength, Min, MinLength } from 'class-validator';
 
@@ -52,6 +53,19 @@ export class ResetAdminPasswordDto {
 export class CreateAiConversationDto {
   @IsString() expert_id!: string;
   @IsOptional() @IsString() title?: string;
+}
+
+/**
+ * Phân trang danh sách hội thoại AI.
+ *
+ * Cùng khuôn với `FriendListQueryDto` — `page` từ 1, `limit` mặc định 20 và
+ * chặn trên ở 50. Trước đây endpoint trả TOÀN BỘ hội thoại kèm tin cuối của
+ * mỗi cái: đo ngày 24/09/2026 là ~2 KB một dòng, 20 dòng đã 39 KB, và con số
+ * đó chỉ có tăng vì không ai xoá hội thoại cũ.
+ */
+export class AiConversationQueryDto {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page = 1;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(50) limit = 20;
 }
 
 export class RenameAiConversationDto {

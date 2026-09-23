@@ -8,6 +8,7 @@ import { ok } from '../common/api-response';
 import { AgencyService } from './agency.service';
 import { AiService } from './ai.service';
 import {
+  AiConversationQueryDto,
   BuyAgencyPackageDto,
   CreateAdminAccountDto,
   CreateAgencyApplicationDto,
@@ -65,7 +66,11 @@ export class Phase2Controller {
   }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('investor/ai/conversations')
-  conversations(@Req() req: AuthenticatedRequest) { return this.ai.listConversations(authUser(req).id).then((data) => ok(data)); }
+  conversations(@Req() req: AuthenticatedRequest, @Query() query: AiConversationQueryDto) {
+    return this.ai
+      .listConversations(authUser(req).id, query)
+      .then(({ data, extra }) => ok(data, 'Thành công', extra));
+  }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('investor/ai/conversations/:id')
   conversation(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
