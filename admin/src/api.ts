@@ -46,6 +46,10 @@ export type AgencyRow = {
   status: AgencyStatus;
   totalRevenueVnd: string;
   totalCommissionVnd: string;
+  title?: string;
+  totalPackagesPurchased?: number;
+  discountRate?: string;
+  remaining_commission_slots?: number;
   child_count: number;
   createdAt: string;
   user: { id: string; fullName: string; email: string; phone?: string; referralCode: string };
@@ -58,6 +62,13 @@ export type AgencyRow = {
 };
 
 export type AgencyStats = { pending: number; active: number; month_revenue_vnd: string; month_commission_vnd: string };
+export type AgencyPackageConfig = {
+  base_price_usd: string;
+  usd_vnd_rate: string;
+  unit_price_vnd: string;
+  tiers: Array<{ code: string; title: string; from_package: number; to_package: number | null; discount_percent: number }>;
+  updated_at: string;
+};
 export type AdminAccount = {
   id: string;
   email: string;
@@ -117,11 +128,20 @@ const demoKyc: KycRow = {
 };
 
 const demoAgencies: AgencyRow[] = [
-  { id: 'a1', code: 'DL000128', businessName: 'Lộc Store', phone: '0988123456', address: '123 Nguyễn Huệ, Quận 1, TP. Hồ Chí Minh', taxCode: '0123456789-001', status: 'PENDING', totalRevenueVnd: '320000000', totalCommissionVnd: '32050000', child_count: 12, createdAt: '2026-09-07T02:15:00.000Z', user: { id: 'u1', fullName: 'Nguyễn Văn Lộc', email: 'loc.nguyen@example.com', referralCode: 'REFLOC' }, store: { id: 's1', slug: 'loc-store-dl000128', name: 'Lộc Store', isActive: false }, active_package: { id: 'p1', tier: 'TIER_2', quantity: 50, remainingCommissionSlots: 45, discountRate: '0.4', product: { name: 'Mindo Genesis' } }, contract: undefined },
-  { id: 'a2', code: 'DL000127', businessName: 'Mai Mindo', phone: '0901234567', address: 'Đà Nẵng', status: 'APPROVED', totalRevenueVnd: '285000000', totalCommissionVnd: '28530000', child_count: 8, createdAt: '2026-09-06T03:00:00.000Z', user: { id: 'u2', fullName: 'Trần Thị Mai', email: 'mai.tran@example.com', referralCode: 'REFMAI' }, store: { id: 's2', slug: 'mai-mindo-dl000127', name: 'Mai Mindo', isActive: true }, active_package: { id: 'p2', tier: 'TIER_2', quantity: 50, remainingCommissionSlots: 38, discountRate: '0.4', product: { name: 'Mindo Genesis' } }, contract: { contractNumber: 'MD-2026-DL000127', issuedAt: '2026-09-06T03:30:00.000Z' } },
-  { id: 'a3', code: 'DL000126', businessName: 'Huy NFT', phone: '0911222333', address: 'Hà Nội', status: 'APPROVED', totalRevenueVnd: '156000000', totalCommissionVnd: '15670000', child_count: 5, createdAt: '2026-09-05T03:00:00.000Z', user: { id: 'u3', fullName: 'Lê Quang Huy', email: 'huy.le@example.com', referralCode: 'REFHUY' }, store: { id: 's3', slug: 'huy-nft-dl000126', name: 'Huy NFT', isActive: true }, active_package: { id: 'p3', tier: 'TIER_1', quantity: 20, remainingCommissionSlots: 15, discountRate: '0.3', product: { name: 'Mindo Genesis' } }, contract: { contractNumber: 'MD-2026-DL000126', issuedAt: '2026-09-05T04:00:00.000Z' } },
-  { id: 'a4', code: 'DL000124', businessName: 'Nam Digital', phone: '0933444555', address: 'Cần Thơ', status: 'LOCKED', totalRevenueVnd: '98000000', totalCommissionVnd: '9840000', child_count: 3, createdAt: '2026-09-04T03:00:00.000Z', user: { id: 'u4', fullName: 'Đặng Hoàng Nam', email: 'nam.dang@example.com', referralCode: 'REFNAM' }, store: { id: 's4', slug: 'nam-digital-dl000124', name: 'Nam Digital', isActive: false }, active_package: { id: 'p4', tier: 'TIER_1', quantity: 10, remainingCommissionSlots: 5, discountRate: '0.3', product: { name: 'Mindo Genesis' } }, contract: { contractNumber: 'MD-2026-DL000124', issuedAt: '2026-09-04T04:00:00.000Z' } },
+  { id: 'a1', code: 'DL000128', businessName: 'Lộc Store', phone: '0988123456', address: '123 Nguyễn Huệ, Quận 1, TP. Hồ Chí Minh', taxCode: '0123456789-001', status: 'PENDING', totalRevenueVnd: '320000000', totalCommissionVnd: '32050000', title: 'TIER_2', totalPackagesPurchased: 50, discountRate: '0.3', remaining_commission_slots: 45, child_count: 12, createdAt: '2026-09-07T02:15:00.000Z', user: { id: 'u1', fullName: 'Nguyễn Văn Lộc', email: 'loc.nguyen@example.com', referralCode: 'REFLOC' }, store: { id: 's1', slug: 'loc-store-dl000128', name: 'Lộc Store', isActive: false }, active_package: { id: 'p1', tier: 'TIER_2', quantity: 50, remainingCommissionSlots: 45, discountRate: '0.3', product: { name: 'Mindo Genesis' } }, contract: undefined },
+  { id: 'a2', code: 'DL000127', businessName: 'Mai Mindo', phone: '0901234567', address: 'Đà Nẵng', status: 'APPROVED', totalRevenueVnd: '285000000', totalCommissionVnd: '28530000', title: 'TIER_2', totalPackagesPurchased: 72, discountRate: '0.3', remaining_commission_slots: 38, child_count: 8, createdAt: '2026-09-06T03:00:00.000Z', user: { id: 'u2', fullName: 'Trần Thị Mai', email: 'mai.tran@example.com', referralCode: 'REFMAI' }, store: { id: 's2', slug: 'mai-mindo-dl000127', name: 'Mai Mindo', isActive: true }, active_package: { id: 'p2', tier: 'TIER_2', quantity: 50, remainingCommissionSlots: 38, discountRate: '0.3', product: { name: 'Mindo Genesis' } }, contract: { contractNumber: 'MD-2026-DL000127', issuedAt: '2026-09-06T03:30:00.000Z' } },
+  { id: 'a3', code: 'DL000126', businessName: 'Huy NFT', phone: '0911222333', address: 'Hà Nội', status: 'APPROVED', totalRevenueVnd: '156000000', totalCommissionVnd: '15670000', title: 'TIER_1', totalPackagesPurchased: 20, discountRate: '0.2', remaining_commission_slots: 15, child_count: 5, createdAt: '2026-09-05T03:00:00.000Z', user: { id: 'u3', fullName: 'Lê Quang Huy', email: 'huy.le@example.com', referralCode: 'REFHUY' }, store: { id: 's3', slug: 'huy-nft-dl000126', name: 'Huy NFT', isActive: true }, active_package: { id: 'p3', tier: 'TIER_1', quantity: 20, remainingCommissionSlots: 15, discountRate: '0.2', product: { name: 'Mindo Genesis' } }, contract: { contractNumber: 'MD-2026-DL000126', issuedAt: '2026-09-05T04:00:00.000Z' } },
+  { id: 'a4', code: 'DL000124', businessName: 'Nam Digital', phone: '0933444555', address: 'Cần Thơ', status: 'LOCKED', totalRevenueVnd: '98000000', totalCommissionVnd: '9840000', title: 'TIER_1', totalPackagesPurchased: 10, discountRate: '0.2', remaining_commission_slots: 5, child_count: 3, createdAt: '2026-09-04T03:00:00.000Z', user: { id: 'u4', fullName: 'Đặng Hoàng Nam', email: 'nam.dang@example.com', referralCode: 'REFNAM' }, store: { id: 's4', slug: 'nam-digital-dl000124', name: 'Nam Digital', isActive: false }, active_package: { id: 'p4', tier: 'TIER_1', quantity: 10, remainingCommissionSlots: 5, discountRate: '0.2', product: { name: 'Mindo Genesis' } }, contract: { contractNumber: 'MD-2026-DL000124', issuedAt: '2026-09-04T04:00:00.000Z' } },
 ];
+
+const demoAgencyPackageConfig: AgencyPackageConfig = {
+  base_price_usd: '25', usd_vnd_rate: '25000', unit_price_vnd: '625000', updated_at: new Date().toISOString(),
+  tiers: [
+    { code: 'TIER_1', title: 'Đại lý 1', from_package: 1, to_package: 49, discount_percent: 20 },
+    { code: 'TIER_2', title: 'Đại lý 2', from_package: 50, to_package: 199, discount_percent: 30 },
+    { code: 'TIER_3', title: 'Đại lý 3', from_package: 200, to_package: null, discount_percent: 40 },
+  ],
+};
 
 const demoExperts: AiExpert[] = [
   { id: 'e1', name: 'Minh Tâm', slug: 'mindo-tai-chinh', specialty: 'Tài chính cá nhân', description: 'Hỗ trợ kế hoạch tài chính và quản lý dòng tiền.', systemPrompt: 'Chuyên gia tài chính Mindo.', capabilities: ['CHAT', 'DOCUMENT'], isActive: true },
@@ -174,6 +194,10 @@ export const api = {
     ? Promise.resolve(demoAgencies.filter((row) => (!status || row.status === status) && (!search || `${row.businessName} ${row.code} ${row.user.email}`.toLowerCase().includes(search.toLowerCase()))))
     : request<AgencyRow[]>(`/api/v1/admin/agencies?search=${encodeURIComponent(search)}&status=${encodeURIComponent(status)}`),
   agencyDetail: (id: string) => demoMode ? Promise.resolve(demoAgencies.find((row) => row.id === id)!) : request<AgencyRow>(`/api/v1/admin/agencies/${id}`),
+  agencyPackageSettings: () => demoMode ? Promise.resolve(demoAgencyPackageConfig) : request<AgencyPackageConfig>('/api/v1/admin/agency-package-settings'),
+  updateAgencyPackageSettings: (usdVndRate: number) => demoMode
+    ? Promise.resolve({ ...demoAgencyPackageConfig, usd_vnd_rate: String(usdVndRate), unit_price_vnd: String(Math.round(25 * usdVndRate)), updated_at: new Date().toISOString() })
+    : request<AgencyPackageConfig>('/api/v1/admin/agency-package-settings', { method: 'PATCH', body: JSON.stringify({ usd_vnd_rate: usdVndRate }) }),
   reviewAgency: (id: string, status: AgencyStatus, note: string) => demoMode
     ? Promise.resolve({ id, status })
     : request(`/api/v1/admin/agencies/${id}/review`, { method: 'POST', body: JSON.stringify({ status, review_note: note, rejection_reason: status === 'REJECTED' ? note : undefined }) }),

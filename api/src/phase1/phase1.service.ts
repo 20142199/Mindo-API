@@ -294,12 +294,12 @@ export class Phase1Service {
       requireAvailableSupply(product.totalSupply, product.soldCount, quote.amount);
       const agency = agencyCode ? await tx.agency.findUnique({
         where: { code: agencyCode.toUpperCase() },
-        include: { store: true, packages: { where: { status: 'ACTIVE', remainingCommissionSlots: { gt: 0 } }, orderBy: { createdAt: 'desc' }, take: 1 } },
+        include: { store: true, packages: { where: { status: 'ACTIVE', remainingCommissionSlots: { gt: 0 } }, orderBy: { createdAt: 'asc' }, take: 1 } },
       }) : null;
       if (agencyCode && (!agency || agency.status !== 'APPROVED' || !agency.store?.isActive)) throw new BadRequestException('Mã đại lý không hợp lệ hoặc đã bị khóa');
       if (agency?.userId === userId) throw new BadRequestException('Đại lý không thể tự nhận hoa hồng cho đơn của mình');
       const activePackage = agency?.packages[0];
-      const commissionRate = activePackage?.discountRate;
+      const commissionRate = activePackage && agency?.discountRate.greaterThan(0) ? agency.discountRate : undefined;
       const commissionVnd = commissionRate ? total.mul(commissionRate).toDecimalPlaces(0) : undefined;
       const created = await tx.purchaseOrder.create({
         data: {

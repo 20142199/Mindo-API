@@ -116,8 +116,29 @@ async function main() {
   const product = await prisma.nftProduct.findFirst({ orderBy: { createdAt: 'asc' } });
   if (product && (await prisma.agencyPackagePurchase.count({ where: { agencyId: agency.id } })) === 0) {
     await prisma.agencyPackagePurchase.create({
-      data: { agencyId: agency.id, productId: product.id, tier: 'TIER_2', quantity: 50, discountRate: '0.4', grossAmountVnd: product.unitPriceVnd.mul(50), netAmountVnd: product.unitPriceVnd.mul(30), commissionSlots: 50, remainingCommissionSlots: 50 },
+      data: {
+        agencyId: agency.id,
+        productId: product.id,
+        tier: 'TIER_2',
+        quantity: 50,
+        discountRate: '0.30',
+        grossAmountVnd: '31250000',
+        netAmountVnd: '24937500',
+        unitPriceUsd: '25',
+        usdVndRate: '25000',
+        unitPriceVnd: '625000',
+        startingPackageNumber: 1,
+        endingPackageNumber: 50,
+        effectiveDiscountRate: '0.202',
+        pricingBreakdown: [
+          { tier: 'TIER_1', title: 'Đại lý 1', from_package: 1, to_package: 49, quantity: 49, discount_rate: 0.2, gross_amount_vnd: 30625000, net_amount_vnd: 24500000 },
+          { tier: 'TIER_2', title: 'Đại lý 2', from_package: 50, to_package: 50, quantity: 1, discount_rate: 0.3, gross_amount_vnd: 625000, net_amount_vnd: 437500 },
+        ],
+        commissionSlots: 50,
+        remainingCommissionSlots: 50,
+      },
     });
+    await prisma.agency.update({ where: { id: agency.id }, data: { title: 'TIER_2', totalPackagesPurchased: 50, discountRate: '0.30' } });
   }
 
   const experts = [

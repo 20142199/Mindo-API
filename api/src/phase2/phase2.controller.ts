@@ -16,6 +16,7 @@ import {
   ResetAdminPasswordDto,
   ReviewAgencyDto,
   UpdateAdminRoleDto,
+  UpdateAgencyPackageSettingDto,
   UpdateAgencyStoreDto,
   UpsertAiExpertDto,
 } from './phase2.dto';
@@ -50,6 +51,9 @@ export class Phase2Controller {
   buyPackage(@Req() req: AuthenticatedRequest, @Body() dto: BuyAgencyPackageDto) {
     return this.agencies.buyPackage(authUser(req).id, dto).then((data) => ok(data, 'Đã mua gói đại lý'));
   }
+
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('investor/agency/packages/config')
+  agencyPackageConfig() { return this.agencies.packageConfig().then((data) => ok(data)); }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('investor/agency/dashboard')
   agencyDashboard(@Req() req: AuthenticatedRequest) { return this.agencies.dashboard(authUser(req).id).then((data) => ok(data)); }
@@ -91,6 +95,14 @@ export class Phase2Controller {
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Roles(...adminRoles) @Get('admin/agencies/stats')
   agencyStats() { return this.agencies.adminStats().then((data) => ok(data)); }
+
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Roles(...adminRoles) @Get('admin/agency-package-settings')
+  agencyPackageSettings() { return this.agencies.packageConfig().then((data) => ok(data)); }
+
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Roles(UserRole.ADMIN) @Patch('admin/agency-package-settings')
+  updateAgencyPackageSettings(@Req() req: AuthenticatedRequest, @Body() dto: UpdateAgencyPackageSettingDto) {
+    return this.agencies.updatePackageConfig(authUser(req).id, dto).then((data) => ok(data, 'Đã cập nhật tỷ giá gói đại lý'));
+  }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Roles(...adminRoles) @Get('admin/agencies/tree')
   agencyTree() { return this.agencies.tree().then((data) => ok(data)); }

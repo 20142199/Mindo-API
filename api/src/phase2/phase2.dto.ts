@@ -1,5 +1,5 @@
 import { AgencyStatus, AiMessageKind, UserRole } from '@prisma/client';
-import { IsArray, IsBoolean, IsEmail, IsEnum, IsHexColor, IsInt, IsOptional, IsString, IsUrl, Max, Min, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsEnum, IsHexColor, IsInt, IsNumber, IsOptional, IsString, IsUrl, Max, Min, MinLength } from 'class-validator';
 
 export class CreateAgencyApplicationDto {
   @IsString() @MinLength(2) business_name!: string;
@@ -20,8 +20,12 @@ export class UpdateAgencyStoreDto {
 }
 
 export class BuyAgencyPackageDto {
-  @IsString() product_id!: string;
+  @IsOptional() @IsString() product_id?: string;
   @IsInt() @Min(1) @Max(10_000) quantity!: number;
+}
+
+export class UpdateAgencyPackageSettingDto {
+  @IsNumber() @Min(1) @Max(1_000_000) usd_vnd_rate!: number;
 }
 
 export class ReviewAgencyDto {

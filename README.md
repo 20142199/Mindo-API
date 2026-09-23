@@ -13,7 +13,7 @@ The platform includes the Phase 1 core plus the Phase 2 agency, commission, AI e
 - News list and admin CRUD API
 - RBAC, append-only ledger entries, idempotency keys, and audit logs
 - Agency application, manual approval, one-time contract, private store, and hierarchy
-- Agency package tiers (1–49: 30%, 50–199: 40%, 200+: 50%) with commission capacity
+- Cumulative agency titles (1–49: 20%, 50–199: 30%, 200+: 40%) with commission capacity
 - NFT orders attributed to an agency with idempotent commission settlement during internal issuance
 - AI experts, conversation history, queued responses, image/document/translation task types, and SSE updates
 - Agora audio/video calls, online signaling, active-call recovery, timeout handling, and call history
@@ -63,7 +63,7 @@ With the local services and API running, `npm run test:e2e:local -w api` verifie
 
 Investors apply through `POST /api/v1/investor/agency/applications`. Admin staff review the application, and the first approval issues one immutable contract snapshot and activates the agency store. Approved agencies can configure their store, buy an NFT package, and view sales and commission history. Admin endpoints provide list, detail, metrics, hierarchy, review, locking, and contract download.
 
-Agency package rules are stored on each purchase so later configuration changes do not rewrite historical commissions. A package provides a finite number of commission slots. When a customer buys through `agency_code`, the order uses one slot; the internal NFT and agency commission are issued together in the same database transaction and are unique by purchase order.
+Each agency package is listed at 25 USD and converted to VND with an exchange rate managed in Admin. Package discounts are cumulative and marginal: packages 1–49 receive 20%, packages 50–199 receive 30%, and packages 200 onward receive 40%, so the new rate starts on the exact package that reaches its threshold. The price, rate, title and breakdown are snapshotted on every purchase. A package provides a finite number of commission slots. When a customer buys through `agency_code`, the order uses one slot at the agency's current title rate; the internal NFT and agency commission are issued together in the same database transaction and are unique by purchase order.
 
 ## Phase 2 — AI experts
 

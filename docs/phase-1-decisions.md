@@ -24,7 +24,7 @@ KYC remains intentionally manual: customers upload identity data and protected d
 
 - Agency applications require completed KYC and manual Admin approval.
 - The first approval produces one contract snapshot; later lock/unlock actions do not issue a second contract.
-- Package thresholds follow the estimate: 1–49 at 30%, 50–199 at 40%, and 200+ at 50%. Rates are snapshotted on package and order records.
+- Agency title thresholds are cumulative: packages 1–49 use 20%, 50–199 use 30%, and 200+ use 40%. A new rate starts on the package that reaches its threshold; package purchases snapshot the 25 USD list price, USD/VND rate and marginal price breakdown.
 - Each package quantity creates the same number of eligible commission slots. A customer NFT order consumes one slot, regardless of NFT quantity.
 - Commission is credited in the same database transaction as internal NFT issuance and is unique per order.
 - AI work uses an asynchronous queue. Local development uses a deterministic mock; production uses an OpenAI-compatible API through environment configuration.

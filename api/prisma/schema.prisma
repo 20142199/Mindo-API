@@ -114,64 +114,65 @@ enum CallStatus {
 }
 
 model User {
-  id                         String                @id @default(cuid())
-  email                      String                @unique
-  passwordHash               String
-  fullName                   String
-  nickname                   String?
-  referralCode               String                @unique @default(cuid())
-  referredById               String?
-  phone                      String?
-  phoneNormalized            String?               @unique
-  address                    String?
-  avatarFileId               String?
-  bankAccountName            String?
-  bankAccountNumber          String?
-  bankName                   String?
-  language                   String                @default("vi")
-  suspiciousLoginAlerts      Boolean               @default(true)
-  loginRateLimitEnabled      Boolean               @default(true)
-  inAppNotifications         Boolean               @default(true)
-  emailNotifications         Boolean               @default(true)
-  failedLoginAttempts        Int                   @default(0)
-  loginLockedUntil           DateTime?
-  role                       UserRole              @default(INVESTOR)
-  status                     UserStatus            @default(ACTIVE)
-  balanceVnd                 Decimal               @default(0) @db.Decimal(20, 0)
-  emailVerifiedAt            DateTime?
-  termsAcceptedAt            DateTime?
-  kycVerifiedAt              DateTime?
-  createdAt                  DateTime              @default(now())
-  updatedAt                  DateTime              @updatedAt
-  refreshTokens              RefreshToken[]
-  passwordResetTickets       PasswordResetTicket[]
-  kycSubmissions             KycSubmission[]       @relation("KycOwner")
-  reviewedKyc                KycSubmission[]       @relation("KycReviewer")
-  deposits                   Deposit[]             @relation("DepositOwner")
-  reviewedDeposits           Deposit[]             @relation("DepositReviewer")
-  purchaseOrders             PurchaseOrder[]
-  nftAssets                  NftAsset[]
-  ledgerEntries              LedgerEntry[]
-  files                      FileUpload[]
-  auditLogs                  AuditLog[]            @relation("AuditActor")
-  referredBy                 User?                 @relation("UserReferrals", fields: [referredById], references: [id], onDelete: SetNull)
-  referrals                  User[]                @relation("UserReferrals")
-  claimedSystemReferralCode  SystemReferralCode?   @relation("SystemReferralClaim")
-  createdSystemReferralCodes SystemReferralCode[]  @relation("SystemReferralCreator")
-  referralCommissions        ReferralCommission[]  @relation("ReferralBeneficiary")
-  referralCommissionOrders   ReferralCommission[]  @relation("ReferralBuyer")
-  updatedReferralSettings    ReferralSetting[]     @relation("ReferralSettingUpdater")
-  agency                     Agency?               @relation("AgencyOwner")
-  reviewedAgencies           Agency[]              @relation("AgencyReviewer")
-  agencyCommissionPurchases  AgencyCommission[]    @relation("CommissionBuyer")
-  issuedAgencyContracts      AgencyContract[]      @relation("ContractIssuer")
-  aiConversations            AiConversation[]
-  outgoingCalls              Call[]                @relation("CallCaller")
-  incomingCalls              Call[]                @relation("CallCallee")
-  sentFriendRequests         FriendRequest[]       @relation("FriendRequestSender")
-  receivedFriendRequests     FriendRequest[]       @relation("FriendRequestRecipient")
-  friendships                Friendship[]          @relation("FriendshipOwner")
-  friendOf                   Friendship[]          @relation("FriendshipTarget")
+  id                           String                 @id @default(cuid())
+  email                        String                 @unique
+  passwordHash                 String
+  fullName                     String
+  nickname                     String?
+  referralCode                 String                 @unique @default(cuid())
+  referredById                 String?
+  phone                        String?
+  phoneNormalized              String?                @unique
+  address                      String?
+  avatarFileId                 String?
+  bankAccountName              String?
+  bankAccountNumber            String?
+  bankName                     String?
+  language                     String                 @default("vi")
+  suspiciousLoginAlerts        Boolean                @default(true)
+  loginRateLimitEnabled        Boolean                @default(true)
+  inAppNotifications           Boolean                @default(true)
+  emailNotifications           Boolean                @default(true)
+  failedLoginAttempts          Int                    @default(0)
+  loginLockedUntil             DateTime?
+  role                         UserRole               @default(INVESTOR)
+  status                       UserStatus             @default(ACTIVE)
+  balanceVnd                   Decimal                @default(0) @db.Decimal(20, 0)
+  emailVerifiedAt              DateTime?
+  termsAcceptedAt              DateTime?
+  kycVerifiedAt                DateTime?
+  createdAt                    DateTime               @default(now())
+  updatedAt                    DateTime               @updatedAt
+  refreshTokens                RefreshToken[]
+  passwordResetTickets         PasswordResetTicket[]
+  kycSubmissions               KycSubmission[]        @relation("KycOwner")
+  reviewedKyc                  KycSubmission[]        @relation("KycReviewer")
+  deposits                     Deposit[]              @relation("DepositOwner")
+  reviewedDeposits             Deposit[]              @relation("DepositReviewer")
+  purchaseOrders               PurchaseOrder[]
+  nftAssets                    NftAsset[]
+  ledgerEntries                LedgerEntry[]
+  files                        FileUpload[]
+  auditLogs                    AuditLog[]             @relation("AuditActor")
+  referredBy                   User?                  @relation("UserReferrals", fields: [referredById], references: [id], onDelete: SetNull)
+  referrals                    User[]                 @relation("UserReferrals")
+  claimedSystemReferralCode    SystemReferralCode?    @relation("SystemReferralClaim")
+  createdSystemReferralCodes   SystemReferralCode[]   @relation("SystemReferralCreator")
+  referralCommissions          ReferralCommission[]   @relation("ReferralBeneficiary")
+  referralCommissionOrders     ReferralCommission[]   @relation("ReferralBuyer")
+  updatedReferralSettings      ReferralSetting[]      @relation("ReferralSettingUpdater")
+  updatedAgencyPackageSettings AgencyPackageSetting[] @relation("AgencyPackageSettingUpdater")
+  agency                       Agency?                @relation("AgencyOwner")
+  reviewedAgencies             Agency[]               @relation("AgencyReviewer")
+  agencyCommissionPurchases    AgencyCommission[]     @relation("CommissionBuyer")
+  issuedAgencyContracts        AgencyContract[]       @relation("ContractIssuer")
+  aiConversations              AiConversation[]
+  outgoingCalls                Call[]                 @relation("CallCaller")
+  incomingCalls                Call[]                 @relation("CallCallee")
+  sentFriendRequests           FriendRequest[]        @relation("FriendRequestSender")
+  receivedFriendRequests       FriendRequest[]        @relation("FriendRequestRecipient")
+  friendships                  Friendship[]           @relation("FriendshipOwner")
+  friendOf                     Friendship[]           @relation("FriendshipTarget")
 }
 
 model FriendRequest {
@@ -464,34 +465,37 @@ model ReferralCommission {
 }
 
 model Agency {
-  id                 String                  @id @default(cuid())
-  userId             String                  @unique
-  code               String                  @unique
-  businessName       String
-  taxCode            String?
-  phone              String
-  address            String
-  status             AgencyStatus            @default(PENDING)
-  parentId           String?
-  reviewNote         String?
-  rejectionReason    String?
-  reviewedById       String?
-  reviewedAt         DateTime?
-  approvedAt         DateTime?
-  lockedAt           DateTime?
-  totalRevenueVnd    Decimal                 @default(0) @db.Decimal(20, 0)
-  totalCommissionVnd Decimal                 @default(0) @db.Decimal(20, 0)
-  createdAt          DateTime                @default(now())
-  updatedAt          DateTime                @updatedAt
-  user               User                    @relation("AgencyOwner", fields: [userId], references: [id], onDelete: Cascade)
-  reviewedBy         User?                   @relation("AgencyReviewer", fields: [reviewedById], references: [id])
-  parent             Agency?                 @relation("AgencyTree", fields: [parentId], references: [id], onDelete: SetNull)
-  children           Agency[]                @relation("AgencyTree")
-  store              AgencyStore?
-  packages           AgencyPackagePurchase[]
-  commissions        AgencyCommission[]
-  purchaseOrders     PurchaseOrder[]
-  contract           AgencyContract?
+  id                     String                  @id @default(cuid())
+  userId                 String                  @unique
+  code                   String                  @unique
+  businessName           String
+  taxCode                String?
+  phone                  String
+  address                String
+  status                 AgencyStatus            @default(PENDING)
+  parentId               String?
+  reviewNote             String?
+  rejectionReason        String?
+  reviewedById           String?
+  reviewedAt             DateTime?
+  approvedAt             DateTime?
+  lockedAt               DateTime?
+  totalRevenueVnd        Decimal                 @default(0) @db.Decimal(20, 0)
+  totalCommissionVnd     Decimal                 @default(0) @db.Decimal(20, 0)
+  title                  String?
+  totalPackagesPurchased Int                     @default(0)
+  discountRate           Decimal                 @default(0) @db.Decimal(5, 4)
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  user                   User                    @relation("AgencyOwner", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedBy             User?                   @relation("AgencyReviewer", fields: [reviewedById], references: [id])
+  parent                 Agency?                 @relation("AgencyTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children               Agency[]                @relation("AgencyTree")
+  store                  AgencyStore?
+  packages               AgencyPackagePurchase[]
+  commissions            AgencyCommission[]
+  purchaseOrders         PurchaseOrder[]
+  contract               AgencyContract?
 
   @@index([status, createdAt])
   @@index([parentId])
@@ -523,6 +527,13 @@ model AgencyPackagePurchase {
   discountRate             Decimal             @db.Decimal(5, 4)
   grossAmountVnd           Decimal             @db.Decimal(20, 0)
   netAmountVnd             Decimal             @db.Decimal(20, 0)
+  unitPriceUsd             Decimal             @default(25) @db.Decimal(10, 2)
+  usdVndRate               Decimal             @default(25000) @db.Decimal(20, 4)
+  unitPriceVnd             Decimal             @default(625000) @db.Decimal(20, 0)
+  startingPackageNumber    Int                 @default(1)
+  endingPackageNumber      Int                 @default(1)
+  effectiveDiscountRate    Decimal             @default(0) @db.Decimal(5, 4)
+  pricingBreakdown         Json?
   commissionSlots          Int
   remainingCommissionSlots Int
   status                   AgencyPackageStatus @default(ACTIVE)
@@ -531,6 +542,19 @@ model AgencyPackagePurchase {
   product                  NftProduct          @relation(fields: [productId], references: [id])
 
   @@index([agencyId, status, createdAt])
+  @@index([productId])
+}
+
+model AgencyPackageSetting {
+  id           String   @id
+  basePriceUsd Decimal  @default(25) @db.Decimal(10, 2)
+  usdVndRate   Decimal  @default(25000) @db.Decimal(20, 4)
+  updatedById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  updatedBy    User?    @relation("AgencyPackageSettingUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([updatedById])
 }
 
 model AgencyCommission {

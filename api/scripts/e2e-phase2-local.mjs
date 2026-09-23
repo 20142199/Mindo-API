@@ -8,6 +8,9 @@ const applicantEmail = `phase2-agent-${runId}@mindo.local`;
 const buyerEmail = `phase2-buyer-${runId}@mindo.local`;
 const adminEmail = `phase2-admin-${runId}@mindo.local`;
 const adminTokenIdsBefore = new Set();
+const testStartedAt = new Date();
+let packageSettingBefore;
+let packageSettingTouched = false;
 
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -27,6 +30,24 @@ async function login(email, password) {
 }
 
 async function cleanup() {
+  if (packageSettingTouched) {
+    await prisma.auditLog.deleteMany({ where: { action: 'AGENCY_PACKAGE_EXCHANGE_RATE_UPDATED', entityId: 'default', createdAt: { gte: testStartedAt } } });
+    if (packageSettingBefore) {
+      await prisma.agencyPackageSetting.upsert({
+        where: { id: packageSettingBefore.id },
+        create: packageSettingBefore,
+        update: {
+          basePriceUsd: packageSettingBefore.basePriceUsd,
+          usdVndRate: packageSettingBefore.usdVndRate,
+          updatedById: packageSettingBefore.updatedById,
+          createdAt: packageSettingBefore.createdAt,
+          updatedAt: packageSettingBefore.updatedAt,
+        },
+      });
+    } else {
+      await prisma.agencyPackageSetting.deleteMany({ where: { id: 'default' } });
+    }
+  }
   const users = await prisma.user.findMany({ where: { email: { in: [applicantEmail, buyerEmail, adminEmail] } }, select: { id: true } });
   const userIds = users.map((user) => user.id);
   if (!userIds.length) return;
@@ -74,6 +95,12 @@ try {
   (await prisma.refreshToken.findMany({ where: { userId: seededAdmin.id }, select: { id: true } })).forEach((token) => adminTokenIdsBefore.add(token.id));
   const adminLogin = await request('/admin/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'admin@local.test', password: 'ChangeMe123!' }) });
   const adminAuth = { authorization: `Bearer ${adminLogin.data.access_token}` };
+  packageSettingBefore = await prisma.agencyPackageSetting.findUnique({ where: { id: 'default' } });
+  const initialPackageConfig = await request('/admin/agency-package-settings', { headers: adminAuth });
+  assert(initialPackageConfig.data.base_price_usd === '25', 'Giá niêm yết gói đại lý không phải 25 USD');
+  packageSettingTouched = true;
+  const packageConfig = await request('/admin/agency-package-settings', { method: 'PATCH', headers: { ...adminAuth, 'content-type': 'application/json' }, body: JSON.stringify({ usd_vnd_rate: 25000 }) });
+  assert(packageConfig.data.unit_price_vnd === '625000', 'Tỷ giá USD/VND chưa được áp dụng vào giá gói');
 
   const application = await request('/investor/agency/applications', { method: 'POST', headers: { ...applicantAuth, 'content-type': 'application/json' }, body: JSON.stringify({ business_name: 'Mindo Phase 2 Store', tax_code: '0319999921', phone: '0900000021', address: 'Quận 1, TP. Hồ Chí Minh' }) });
   assert(application.data.status === 'PENDING', 'Hồ sơ đại lý không ở trạng thái chờ duyệt');
@@ -91,19 +118,24 @@ try {
   assert(publicStore.data.agency.code === agencyCode, 'Cửa hàng riêng không gắn đúng đại lý');
 
   const product = publicStore.data.products[0];
-  const packagePurchase = await request('/investor/agency/packages', { method: 'POST', headers: { ...applicantAuth, 'content-type': 'application/json' }, body: JSON.stringify({ product_id: product.id, quantity: 1 }) });
-  assert(packagePurchase.data.tier === 'TIER_1' && packagePurchase.data.discountRate === '0.3', 'Gói đại lý không áp dụng mức 30%');
+  const packagePurchase = await request('/investor/agency/packages', { method: 'POST', headers: { ...applicantAuth, 'content-type': 'application/json' }, body: JSON.stringify({ product_id: product.id, quantity: 50 }) });
+  assert(packagePurchase.data.tier === 'TIER_2' && packagePurchase.data.discountRate === '0.3', 'Danh hiệu Đại lý 2 không áp dụng mức 30%');
+  assert(packagePurchase.data.unitPriceUsd === '25' && packagePurchase.data.usdVndRate === '25000', 'Giao dịch mua gói không lưu giá USD và tỷ giá');
+  assert(packagePurchase.data.netAmountVnd === '24937500', 'Chiết khấu chưa được tính từ đúng gói chạm mốc');
+  assert(packagePurchase.data.pricing_breakdown.length === 2 && packagePurchase.data.pricing_breakdown[0].quantity === 49 && packagePurchase.data.pricing_breakdown[1].quantity === 1, 'Mua gói vượt mốc chưa được tách đúng hai bậc giá');
 
   const quote = await request('/investor/invest/snapshot-price', { method: 'POST', headers: { ...buyerAuth, 'content-type': 'application/json' }, body: JSON.stringify({ nft_id: product.id, amount: 1, payment_type: 'BALANCE' }) });
   const purchase = await request('/investor/invest', { method: 'POST', headers: { ...buyerAuth, 'content-type': 'application/json' }, body: JSON.stringify({ price_snapshot: quote.data.price_snapshot, agency_code: agencyCode }) });
   assert(purchase.data.status === 'COMPLETED' && purchase.data.nftAssets?.[0]?.assetCode?.startsWith('MINDO-'), 'NFT nội bộ chưa được cấp ngay sau thanh toán');
   const repeatedPurchase = await request('/investor/invest', { method: 'POST', headers: { ...buyerAuth, 'content-type': 'application/json' }, body: JSON.stringify({ price_snapshot: quote.data.price_snapshot, agency_code: agencyCode }) });
   assert(repeatedPurchase.data.id === purchase.data.id, 'Gửi lại cùng báo giá đã tạo đơn NFT trùng');
-  const [issuedAssets, issuedCommissions] = await Promise.all([
+  const [issuedAssets, issuedCommissions, issuedCommission] = await Promise.all([
     prisma.nftAsset.count({ where: { orderId: purchase.data.id } }),
     prisma.agencyCommission.count({ where: { orderId: purchase.data.id } }),
+    prisma.agencyCommission.findUnique({ where: { orderId: purchase.data.id }, select: { amountVnd: true, rate: true } }),
   ]);
   assert(issuedAssets === 1 && issuedCommissions === 1, 'NFT hoặc hoa hồng nội bộ bị ghi nhận trùng');
+  assert(issuedCommission?.rate.toString() === '0.3' && Number(issuedCommission.amountVnd) === Number(product.unitPriceVnd) * 0.3, 'Hoa hồng sản phẩm chưa dùng mức chiết khấu theo danh hiệu');
   const nftHistory = await request('/investor/history/nfts?status=completed', { headers: buyerAuth });
   const historyPurchase = nftHistory.data.groups.flatMap((group) => group.items).find((item) => item.id === purchase.data.id);
   assert(historyPurchase?.nft_codes?.[0]?.startsWith('MINDO-'), 'Lịch sử chưa trả NFT nội bộ đã cấp');
@@ -137,7 +169,7 @@ try {
   await request(`/admin/accounts/${createdAdmin.data.id}/reset-password`, { method: 'POST', headers: { ...adminAuth, 'content-type': 'application/json' }, body: JSON.stringify({ password: 'ResetPhase2!' }) });
   await request(`/admin/accounts/${createdAdmin.data.id}`, { method: 'DELETE', headers: adminAuth });
 
-  console.log(JSON.stringify({ agency_application_and_approval: 'passed', one_time_contract: 'passed', private_agency_store: 'passed', package_tier_and_discount: 'passed', internal_nft_and_commission_once: 'passed', internal_nft_history: 'passed', ai_queue_and_document: 'passed', admin_rbac_management: 'passed' }, null, 2));
+  console.log(JSON.stringify({ agency_application_and_approval: 'passed', one_time_contract: 'passed', private_agency_store: 'passed', configurable_usd_vnd_rate: 'passed', cumulative_package_title_and_discount: 'passed', internal_nft_and_commission_once: 'passed', internal_nft_history: 'passed', ai_queue_and_document: 'passed', admin_rbac_management: 'passed' }, null, 2));
 } finally {
   await cleanup();
   await prisma.$disconnect();

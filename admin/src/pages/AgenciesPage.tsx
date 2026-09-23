@@ -1,10 +1,10 @@
-import { Check, Clock3, Download, LockKeyhole, RefreshCw, Search, Store, TrendingUp, UsersRound, X } from 'lucide-react';
+import { Check, CircleDollarSign, Clock3, Download, LockKeyhole, RefreshCw, Save, Search, Store, TrendingUp, UsersRound, X } from 'lucide-react';
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { api, type AgencyRow, type AgencyStats, type AgencyStatus } from '../api';
+import { api, type AgencyPackageConfig, type AgencyRow, type AgencyStats, type AgencyStatus } from '../api';
 import { statusDisplay } from '../status';
 
 const money = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 });
-const tierLabels: Record<string, string> = { TIER_1: 'Gói 1', TIER_2: 'Gói 2', TIER_3: 'Gói 3' };
+const tierLabels: Record<string, string> = { TIER_1: 'Đại lý 1', TIER_2: 'Đại lý 2', TIER_3: 'Đại lý 3' };
 
 export function AgenciesPage() {
   const [stats, setStats] = useState<AgencyStats>();
@@ -16,7 +16,10 @@ export function AgenciesPage() {
   const [tier, setTier] = useState('');
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [busy, setBusy] = useState(false);
+  const [packageConfig, setPackageConfig] = useState<AgencyPackageConfig>();
+  const [exchangeRate, setExchangeRate] = useState('25000');
 
   async function load() {
     setError('');
@@ -32,8 +35,14 @@ export function AgenciesPage() {
   }
 
   useEffect(() => { void load(); }, [deferredQuery, status]);
+  useEffect(() => {
+    void api.agencyPackageSettings().then((config) => {
+      setPackageConfig(config);
+      setExchangeRate(config.usd_vnd_rate);
+    }).catch((reason) => setError(reason instanceof Error ? reason.message : 'Không thể tải cấu hình giá gói'));
+  }, []);
 
-  const visibleRows = useMemo(() => rows.filter((row) => !tier || row.active_package?.tier === tier), [rows, tier]);
+  const visibleRows = useMemo(() => rows.filter((row) => !tier || (row.title ?? row.active_package?.tier) === tier), [rows, tier]);
   const cards = [
     { label: 'Chờ duyệt', value: stats?.pending ?? '—', icon: Clock3 },
     { label: 'Đang hoạt động', value: stats?.active ?? '—', icon: UsersRound },
@@ -61,20 +70,47 @@ export function AgenciesPage() {
     finally { setBusy(false); }
   }
 
+  async function saveExchangeRate(event: React.FormEvent) {
+    event.preventDefault();
+    const nextRate = Number(exchangeRate);
+    if (!Number.isFinite(nextRate) || nextRate < 1 || nextRate > 1_000_000) {
+      setError('Tỷ giá phải là số từ 1 đến 1.000.000 VND/USD.');
+      return;
+    }
+    setBusy(true); setError(''); setSuccess('');
+    try {
+      const updated = await api.updateAgencyPackageSettings(nextRate);
+      setPackageConfig(updated);
+      setExchangeRate(updated.usd_vnd_rate);
+      setSuccess('Đã cập nhật tỷ giá mua gói đại lý.');
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Không thể cập nhật tỷ giá'); }
+    finally { setBusy(false); }
+  }
+
   return <div className={selected ? 'page agency-page drawer-open' : 'page agency-page'}>
     <section className="agency-main">
       <h1>Quản lý đại lý</h1>
       {error ? <div className="error-banner">{error}</div> : null}
+      {success ? <div className="success-banner"><Check size={16} /> {success}</div> : null}
       <div className="metric-row agency-metrics">{cards.map(({ label, value, icon: Icon }) => <div className="metric" key={label}><span className="metric-icon"><Icon /></span><span><small>{label}</small><strong className="metric-money">{typeof value === 'number' ? value.toLocaleString('vi-VN') : value}</strong></span></div>)}</div>
+      <section className="work-panel agency-pricing-panel">
+        <div className="agency-pricing-header"><span className="panel-title-icon"><CircleDollarSign /></span><span><h2>Giá và danh hiệu gói đại lý</h2><p>Giá niêm yết 25 USD/gói. Chiết khấu được tính từ đúng gói chạm mốc danh hiệu.</p></span></div>
+        <form className="agency-pricing-form" onSubmit={saveExchangeRate}>
+          <label><span>Tỷ giá quy đổi</span><span className="currency-input"><input aria-label="Tỷ giá USD VND" type="number" min="1" max="1000000" step="1" value={exchangeRate} onChange={(event) => setExchangeRate(event.target.value)} /><b>VND/USD</b></span></label>
+          <div className="price-preview"><small>Giá trước chiết khấu</small><strong>{money.format(25 * (Number(exchangeRate) || 0))}</strong><span>cho 1 gói · 25 USD</span></div>
+          <button className="primary-button" disabled={busy} type="submit"><Save size={16} /> {busy ? 'Đang lưu...' : 'Lưu tỷ giá'}</button>
+        </form>
+        <div className="agency-tier-strip">{packageConfig?.tiers.map((item) => <div className="agency-tier-card" key={item.code}><strong>{item.title}</strong><span>Gói {item.from_package}{item.to_package ? `–${item.to_package}` : ' trở lên'}</span><b>{item.discount_percent}%</b></div>)}</div>
+      </section>
       <section className="work-panel">
         <div className="filters agency-filters">
           <label className="search"><Search size={18} /><input aria-label="Tìm đại lý" placeholder="Tìm tên, email hoặc mã đại lý" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           <label className="select-label"><span>Trạng thái</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">Tất cả</option><option value="PENDING">Chờ duyệt</option><option value="APPROVED">Hoạt động</option><option value="LOCKED">Đã khóa</option><option value="REJECTED">Đã từ chối</option></select></label>
-          <label className="select-label"><span>Gói</span><select value={tier} onChange={(event) => setTier(event.target.value)}><option value="">Tất cả</option><option value="TIER_1">Gói 1</option><option value="TIER_2">Gói 2</option><option value="TIER_3">Gói 3</option></select></label>
+          <label className="select-label"><span>Danh hiệu</span><select value={tier} onChange={(event) => setTier(event.target.value)}><option value="">Tất cả</option><option value="TIER_1">Đại lý 1</option><option value="TIER_2">Đại lý 2</option><option value="TIER_3">Đại lý 3</option></select></label>
           <button className="outline-button" onClick={() => void load()}><RefreshCw size={17} /> Làm mới</button>
         </div>
         <div className="table-heading"><h2>Danh sách đại lý</h2></div>
-        <div className="table-scroll"><table><thead><tr><th>Đại lý</th><th>Mã</th><th>Gói hiện tại</th><th>Doanh số</th><th>Hoa hồng</th><th>Cấp dưới</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>
+        <div className="table-scroll"><table><thead><tr><th>Đại lý</th><th>Mã</th><th>Danh hiệu</th><th>Doanh số</th><th>Hoa hồng</th><th>Cấp dưới</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>
           {visibleRows.map((row) => <AgencyTableRow key={row.id} row={row} selected={row.id === selected?.id} onOpen={openDetail} />)}
           {visibleRows.length === 0 ? <tr><td colSpan={8} className="empty">Không có đại lý phù hợp.</td></tr> : null}
         </tbody></table></div>
@@ -87,7 +123,8 @@ export function AgenciesPage() {
 
 function AgencyTableRow({ row, selected, onOpen }: { row: AgencyRow; selected: boolean; onOpen: (row: AgencyRow) => void }) {
   const status = statusDisplay(row.status);
-  return <tr className={selected ? 'selected-row' : ''}><td><span className="entity-cell"><span className="row-icon"><Store size={16} /></span><span><strong>{row.user.fullName}</strong><small>{row.user.email}</small></span></span></td><td>{row.code}</td><td>{row.active_package ? tierLabels[row.active_package.tier] : 'Chưa có'}</td><td>{money.format(Number(row.totalRevenueVnd))}</td><td>{money.format(Number(row.totalCommissionVnd))}</td><td>{row.child_count}</td><td><span className={`status ${status.tone}`}>{status.label}</span></td><td><button className="text-button" onClick={() => void onOpen(row)}>Xem chi tiết</button></td></tr>;
+  const agencyTitle = row.title ?? row.active_package?.tier;
+  return <tr className={selected ? 'selected-row' : ''}><td><span className="entity-cell"><span className="row-icon"><Store size={16} /></span><span><strong>{row.user.fullName}</strong><small>{row.user.email}</small></span></span></td><td>{row.code}</td><td><span className="tier-cell"><strong>{agencyTitle ? tierLabels[agencyTitle] : 'Chưa có'}</strong>{row.totalPackagesPurchased ? <small>{row.totalPackagesPurchased.toLocaleString('vi-VN')} gói đã mua</small> : null}</span></td><td>{money.format(Number(row.totalRevenueVnd))}</td><td>{money.format(Number(row.totalCommissionVnd))}</td><td>{row.child_count}</td><td><span className={`status ${status.tone}`}>{status.label}</span></td><td><button className="text-button" onClick={() => void onOpen(row)}>Xem chi tiết</button></td></tr>;
 }
 
 function AgencyDrawer({ agency, note, busy, onNote, onClose, onReview, onContract }: { agency: AgencyRow; note: string; busy: boolean; onNote: (value: string) => void; onClose: () => void; onReview: (status: AgencyStatus) => void; onContract: () => void }) {
@@ -98,7 +135,7 @@ function AgencyDrawer({ agency, note, busy, onNote, onClose, onReview, onContrac
     <div className="drawer-actions"><button className="primary-button" disabled={busy || agency.status === 'APPROVED'} onClick={() => onReview('APPROVED')}><Check size={16} /> Phê duyệt</button><button className="outline-button" disabled={busy} onClick={() => onReview('REJECTED')}><X size={16} /> Từ chối</button><button className="outline-button" disabled={busy || agency.status === 'LOCKED'} onClick={() => onReview('LOCKED')}><LockKeyhole size={16} /> Khóa</button></div>
     <DrawerSection title="Thông tin đại lý"><Info label="Tên kinh doanh" value={agency.businessName} /><Info label="Số điện thoại" value={agency.phone} /><Info label="Mã số thuế" value={agency.taxCode || 'Chưa cung cấp'} /><Info label="Địa chỉ" value={agency.address} /></DrawerSection>
     <DrawerSection title="Cửa hàng riêng"><Info label="Tên cửa hàng" value={agency.store?.name || 'Chưa cấu hình'} /><Info label="Đường dẫn" value={agency.store ? `/agency/${agency.store.slug}` : '—'} /><Info label="Trạng thái" value={agency.store?.isActive ? 'Đang hoạt động' : 'Chưa kích hoạt'} /></DrawerSection>
-    <DrawerSection title="Gói NFT"><Info label="Gói hiện tại" value={agency.active_package ? tierLabels[agency.active_package.tier] : 'Chưa mua gói'} /><Info label="Suất còn lại" value={agency.active_package ? `${agency.active_package.remainingCommissionSlots}/${agency.active_package.quantity}` : '—'} /><Info label="Tỷ lệ" value={agency.active_package ? `${Number(agency.active_package.discountRate) * 100}%` : '—'} /></DrawerSection>
+    <DrawerSection title="Danh hiệu & gói"><Info label="Danh hiệu" value={(agency.title ?? agency.active_package?.tier) ? tierLabels[agency.title ?? agency.active_package!.tier] : 'Chưa mua gói'} /><Info label="Tổng gói đã mua" value={`${agency.totalPackagesPurchased ?? agency.active_package?.quantity ?? 0} gói`} /><Info label="Suất hoa hồng còn lại" value={`${agency.remaining_commission_slots ?? agency.active_package?.remainingCommissionSlots ?? 0} suất`} /><Info label="Chiết khấu hiện tại" value={`${Number(agency.discountRate ?? agency.active_package?.discountRate ?? 0) * 100}%`} /></DrawerSection>
     <DrawerSection title="Tuyến trên"><Info label="Đại lý trực tiếp" value={agency.parent ? `${agency.parent.user.fullName} (${agency.parent.code})` : 'Đại lý gốc'} /><div className="tree-preview"><span>{agency.parent?.code ?? 'MINDO'}</span><i /><span>{agency.code}</span><small>{agency.child_count} đại lý cấp dưới</small></div></DrawerSection>
     <DrawerSection title="Hợp đồng"><Info label="Số hợp đồng" value={agency.contract?.contractNumber || 'Chưa phát hành'} />{agency.contract ? <button className="outline-button contract-button" onClick={onContract}><Download size={16} /> Tải hợp đồng</button> : null}</DrawerSection>
     <label className="drawer-note">Ghi chú xử lý<textarea value={note} onChange={(event) => onNote(event.target.value)} placeholder="Nhập ghi chú hoặc lý do từ chối..." /></label>

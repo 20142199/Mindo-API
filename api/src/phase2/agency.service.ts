@@ -11,12 +11,14 @@ import {
   ResetAdminPasswordDto,
   ReviewAgencyDto,
   UpdateAdminRoleDto,
+  UpdateAgencyPackageSettingDto,
   UpdateAgencyStoreDto,
 } from './phase2.dto';
-import { agencyTierForQuantity, buildAgencyTree, slugifyStoreName } from './phase2.domain';
+import { agencyTiers, buildAgencyTree, priceAgencyPackages, slugifyStoreName } from './phase2.domain';
 
 const operationalRoles: UserRole[] = [UserRole.ADMIN, UserRole.COMPLIANCE, UserRole.FINANCE];
 const reviewStatuses: AgencyStatus[] = [AgencyStatus.APPROVED, AgencyStatus.REJECTED, AgencyStatus.LOCKED];
+const packageSettingId = 'default';
 
 @Injectable()
 export class AgencyService {
@@ -81,41 +83,111 @@ export class AgencyService {
   }
 
   async buyPackage(userId: string, dto: BuyAgencyPackageDto) {
-    const tier = agencyTierForQuantity(dto.quantity);
     return this.prisma.$transaction(async (tx) => {
       const agency = await tx.agency.findUnique({ where: { userId }, include: { user: true } });
       if (!agency || agency.status !== AgencyStatus.APPROVED) throw new ForbiddenException('Đại lý chưa được phê duyệt');
-      const product = await tx.nftProduct.findUnique({ where: { id: dto.product_id } });
+      const product = dto.product_id
+        ? await tx.nftProduct.findUnique({ where: { id: dto.product_id } })
+        : await tx.nftProduct.findFirst({ where: { isActive: true }, orderBy: { createdAt: 'asc' } });
       if (!product?.isActive) throw new NotFoundException('Gói NFT không tồn tại');
-      const gross = product.unitPriceVnd.mul(dto.quantity);
-      const rate = new Prisma.Decimal(tier.discountRate);
-      const net = gross.mul(new Prisma.Decimal(1).minus(rate)).toDecimalPlaces(0);
+      const settings = await this.packageSettings(tx);
+      const unitPriceVnd = settings.basePriceUsd.mul(settings.usdVndRate).toDecimalPlaces(0);
+      const pricing = priceAgencyPackages(agency.totalPackagesPurchased, dto.quantity, unitPriceVnd.toNumber());
+      const gross = new Prisma.Decimal(pricing.grossAmountVnd);
+      const net = new Prisma.Decimal(pricing.netAmountVnd);
+      const titleRate = new Prisma.Decimal(pricing.attainedTier.discountRate);
       if (agency.user.balanceVnd.lessThan(net)) throw new BadRequestException('Số dư không đủ để mua gói đại lý');
-      await tx.agencyPackagePurchase.updateMany({
-        where: { agencyId: agency.id, status: AgencyPackageStatus.ACTIVE },
-        data: { status: AgencyPackageStatus.CANCELLED },
-      });
       const purchased = await tx.agencyPackagePurchase.create({
         data: {
           agencyId: agency.id,
           productId: product.id,
-          tier: tier.code,
+          tier: pricing.attainedTier.code,
           quantity: dto.quantity,
-          discountRate: rate,
+          discountRate: titleRate,
           grossAmountVnd: gross,
           netAmountVnd: net,
+          unitPriceUsd: settings.basePriceUsd,
+          usdVndRate: settings.usdVndRate,
+          unitPriceVnd,
+          startingPackageNumber: pricing.startingPackageNumber,
+          endingPackageNumber: pricing.endingPackageNumber,
+          effectiveDiscountRate: new Prisma.Decimal(pricing.effectiveDiscountRate),
+          pricingBreakdown: pricing.breakdown,
           commissionSlots: dto.quantity,
           remainingCommissionSlots: dto.quantity,
         },
         include: { product: true },
       });
-      await tx.user.update({ where: { id: userId }, data: { balanceVnd: { decrement: net } } });
-      await tx.ledgerEntry.create({ data: { userId, amountVnd: net, direction: 'DEBIT', description: `Mua ${tier.label} đại lý (${dto.quantity} suất)` } });
-      await tx.auditLog.create({
-        data: { actorId: userId, action: 'AGENCY_PACKAGE_PURCHASED', entityType: 'AgencyPackagePurchase', entityId: purchased.id, metadata: { tier: tier.code, quantity: dto.quantity } },
+      await tx.agency.update({
+        where: { id: agency.id },
+        data: {
+          totalPackagesPurchased: pricing.endingPackageNumber,
+          title: pricing.attainedTier.code,
+          discountRate: titleRate,
+        },
       });
-      return purchased;
+      await tx.user.update({ where: { id: userId }, data: { balanceVnd: { decrement: net } } });
+      await tx.ledgerEntry.create({ data: { userId, amountVnd: net, direction: 'DEBIT', description: `Mua ${dto.quantity} gói – đạt danh hiệu ${pricing.attainedTier.label}` } });
+      await tx.auditLog.create({
+        data: {
+          actorId: userId,
+          action: 'AGENCY_PACKAGE_PURCHASED',
+          entityType: 'AgencyPackagePurchase',
+          entityId: purchased.id,
+          metadata: {
+            tier: pricing.attainedTier.code,
+            quantity: dto.quantity,
+            totalPackages: pricing.endingPackageNumber,
+            unitPriceUsd: settings.basePriceUsd.toString(),
+            usdVndRate: settings.usdVndRate.toString(),
+            pricingBreakdown: pricing.breakdown,
+          },
+        },
+      });
+      return {
+        ...purchased,
+        agency_title: pricing.attainedTier.code,
+        agency_title_label: pricing.attainedTier.label,
+        total_packages_purchased: pricing.endingPackageNumber,
+        pricing_breakdown: pricing.breakdown,
+      };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  }
+
+  async packageConfig() {
+    const settings = await this.packageSettings();
+    const unitPriceVnd = settings.basePriceUsd.mul(settings.usdVndRate).toDecimalPlaces(0);
+    return {
+      base_price_usd: settings.basePriceUsd.toString(),
+      usd_vnd_rate: settings.usdVndRate.toString(),
+      unit_price_vnd: unitPriceVnd.toString(),
+      tiers: agencyTiers.map((tier) => ({
+        code: tier.code,
+        title: tier.label,
+        from_package: tier.fromPackage,
+        to_package: tier.toPackage,
+        discount_percent: tier.discountRate * 100,
+      })),
+      updated_at: settings.updatedAt,
+    };
+  }
+
+  async updatePackageConfig(actorId: string, dto: UpdateAgencyPackageSettingDto) {
+    await this.prisma.agencyPackageSetting.upsert({
+      where: { id: packageSettingId },
+      create: { id: packageSettingId, basePriceUsd: '25', usdVndRate: new Prisma.Decimal(dto.usd_vnd_rate), updatedById: actorId },
+      update: { usdVndRate: new Prisma.Decimal(dto.usd_vnd_rate), updatedById: actorId },
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        actorId,
+        action: 'AGENCY_PACKAGE_EXCHANGE_RATE_UPDATED',
+        entityType: 'AgencyPackageSetting',
+        entityId: packageSettingId,
+        metadata: { usdVndRate: dto.usd_vnd_rate, basePriceUsd: 25 },
+      },
+    });
+    return this.packageConfig();
   }
 
   async dashboard(userId: string) {
@@ -310,6 +382,14 @@ export class AgencyService {
     });
   }
 
+  private packageSettings(client: Prisma.TransactionClient | PrismaService = this.prisma) {
+    return client.agencyPackageSetting.upsert({
+      where: { id: packageSettingId },
+      create: { id: packageSettingId, basePriceUsd: '25', usdVndRate: '25000' },
+      update: {},
+    });
+  }
+
   private async requireApprovedAgency(userId: string) {
     const agency = await this.requireAgency(userId);
     if (agency.status !== AgencyStatus.APPROVED) throw new ForbiddenException('Đại lý chưa được phê duyệt');
@@ -322,7 +402,10 @@ export class AgencyService {
 
   private view<T extends { packages: Array<{ status: AgencyPackageStatus }>; _count: { children: number } }>(row: T) {
     const activePackage = row.packages.find((item) => item.status === AgencyPackageStatus.ACTIVE) ?? row.packages[0] ?? null;
-    return { ...row, active_package: activePackage, child_count: row._count.children };
+    const remainingSlots = row.packages.reduce((total, item) => total + (
+      item.status === AgencyPackageStatus.ACTIVE && 'remainingCommissionSlots' in item ? Number(item.remainingCommissionSlots) : 0
+    ), 0);
+    return { ...row, active_package: activePackage, child_count: row._count.children, remaining_commission_slots: remainingSlots };
   }
 
   private escapeHtml(value: string) {
