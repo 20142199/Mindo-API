@@ -78,6 +78,26 @@ export type AiExpert = {
   isActive: boolean;
 };
 
+export type ReferralSettings = {
+  direct_rate_percent: number;
+  branch_rate_percent: number;
+  updated_at: string;
+};
+
+export type SystemReferralCodeRow = {
+  id: string;
+  code: string;
+  label?: string;
+  isActive: boolean;
+  claimedAt?: string;
+  createdAt: string;
+  downline_count: number;
+  downline_sales_vnd: string;
+  branch_commission_vnd: string;
+  claimedBy?: { id: string; fullName: string; email: string; referralCode: string; createdAt: string };
+  createdBy: { fullName: string; email: string };
+};
+
 type ApiEnvelope<T> = { data: T; message: string };
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
 const demoMode = import.meta.env.VITE_DEMO_MODE === 'true';
@@ -184,4 +204,13 @@ export const api = {
     return request(expert.id ? `/api/v1/admin/ai-experts/${expert.id}` : '/api/v1/admin/ai-experts', { method: expert.id ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
   },
   toggleAiExpert: (id: string) => demoMode ? Promise.resolve({ id }) : request(`/api/v1/admin/ai-experts/${id}/toggle`, { method: 'POST' }),
+  referralSettings: () => demoMode
+    ? Promise.resolve({ direct_rate_percent: 10, branch_rate_percent: 5, updated_at: new Date().toISOString() } satisfies ReferralSettings)
+    : request<ReferralSettings>('/api/v1/admin/referrals/settings'),
+  updateReferralSettings: (directRate: number, branchRate: number) => demoMode
+    ? Promise.resolve({ direct_rate_percent: directRate, branch_rate_percent: branchRate, updated_at: new Date().toISOString() } satisfies ReferralSettings)
+    : request<ReferralSettings>('/api/v1/admin/referrals/settings', { method: 'PATCH', body: JSON.stringify({ direct_rate_percent: directRate, branch_rate_percent: branchRate }) }),
+  systemReferralCodes: () => demoMode ? Promise.resolve([] as SystemReferralCodeRow[]) : request<SystemReferralCodeRow[]>('/api/v1/admin/referrals/system-codes'),
+  createSystemReferralCode: (label: string) => request<SystemReferralCodeRow>('/api/v1/admin/referrals/system-codes', { method: 'POST', body: JSON.stringify({ label: label || undefined }) }),
+  setSystemReferralCodeActive: (id: string, isActive: boolean) => request(`/api/v1/admin/referrals/system-codes/${id}`, { method: 'PATCH', body: JSON.stringify({ is_active: isActive }) }),
 };

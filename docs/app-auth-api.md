@@ -29,11 +29,12 @@ Successful responses use this envelope:
   "email": "an@example.com",
   "password": "Mindo123!",
   "confirm_password": "Mindo123!",
-  "accept_terms": true
+  "accept_terms": true,
+  "ref_by": "MDABCDEFGH"
 }
 ```
 
-`nickname` and `ref_by` are optional. The API creates the account, records terms acceptance, and sends a six-digit OTP by email. The response contains `verification_required: true` plus `otp.expires_in` and `otp.resend_available_in` in seconds.
+`nickname` and `ref_by` are optional. `ref_by` accepts a normal user's Mindo referral code or an unused system-issued branch code. The API creates a new unique `referral_code` for every account, records terms acceptance, and sends a six-digit OTP by email. The response contains the user and their `referral_code`, `verification_required: true`, plus `otp.expires_in` and `otp.resend_available_in` in seconds.
 
 To resend the registration OTP, call `POST /register/otp`:
 

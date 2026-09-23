@@ -8,6 +8,7 @@ import { KycDetailPage } from './pages/KycDetailPage';
 import { AgenciesPage } from './pages/AgenciesPage';
 import { AdminAccountsPage } from './pages/AdminAccountsPage';
 import { AiExpertsPage } from './pages/AiExpertsPage';
+import { ReferralsPage } from './pages/ReferralsPage';
 
 export default function App() {
   const [route, setRoute] = useState<RouteName>('dashboard');
@@ -18,6 +19,7 @@ export default function App() {
   if (route === 'dashboard') content = <DashboardPage onOpenKyc={(kyc) => { setSelectedKyc(kyc); setRoute('kyc'); }} />;
   else if (route === 'kyc') content = <KycDetailPage row={selectedKyc} onBack={() => setRoute('dashboard')} />;
   else if (route === 'agencies') content = <AgenciesPage />;
+  else if (route === 'referrals') content = <ReferralsPage />;
   else if (route === 'ai-experts') content = <AiExpertsPage />;
   else content = <AdminAccountsPage />;
   return <AppShell route={route} onNavigate={setRoute}>{content}</AppShell>;

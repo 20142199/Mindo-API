@@ -11,6 +11,7 @@
     "test:e2e:phase2": "node scripts/e2e-phase2-local.mjs",
     "test:e2e:calls": "node scripts/e2e-call-local.mjs",
     "test:e2e:friends": "node scripts/e2e-friends-local.mjs",
+    "test:e2e:referrals": "node scripts/e2e-referral-local.mjs",
     "prisma:generate": "prisma generate",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:migrate": "prisma migrate dev --name phase1",

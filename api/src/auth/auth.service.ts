@@ -8,12 +8,13 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { User, UserRole } from '@prisma/client';
+import { Prisma, User, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { EmailService } from '../common/email.service';
 import { PrismaService } from '../common/prisma.module';
 import { ChangePasswordDto, LoginDto, RefreshDto, RegisterDto, ResetPasswordDto, VerifyOtpDto } from './auth.dto';
+import { referralCode } from '../referral/referral.domain';
 
 const hashToken = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -72,6 +73,14 @@ export class AuthService {
     private readonly email: EmailService,
   ) {}
 
+  private async uniqueReferralCode() {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const code = referralCode('MD');
+      if (!(await this.prisma.user.findUnique({ where: { referralCode: code }, select: { id: true } }))) return code;
+    }
+    throw new BadRequestException('Không thể sinh mã giới thiệu, vui lòng thử lại');
+  }
+
   async login(dto: LoginDto, allowedRoles?: UserRole[], context: SessionContext = {}) {
     const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (user?.loginRateLimitEnabled && user.loginLockedUntil && user.loginLockedUntil > new Date()) {
@@ -115,29 +124,62 @@ export class AuthService {
     const email = dto.email;
     if (await this.prisma.user.findUnique({ where: { email } })) throw new ConflictException('Email đã tồn tại');
     let referredById: string | undefined;
+    let systemCodeId: string | undefined;
     if (dto.ref_by?.trim()) {
       const code = dto.ref_by.trim();
-      const referrer = await this.prisma.user.findUnique({ where: { referralCode: code } });
-      const agency = referrer ? null : await this.prisma.agency.findUnique({ where: { code: code.toUpperCase() } });
-      referredById = referrer?.id ?? agency?.userId;
-      if (!referredById) throw new BadRequestException('Mã giới thiệu không hợp lệ');
+      const systemCode = await this.prisma.systemReferralCode.findUnique({ where: { code: code.toUpperCase() } });
+      if (systemCode) {
+        if (!systemCode.isActive || systemCode.claimedById) throw new BadRequestException('Mã đầu nhánh đã hết hiệu lực hoặc đã được sử dụng');
+        systemCodeId = systemCode.id;
+      } else {
+        const referrer = await this.prisma.user.findFirst({ where: { referralCode: { equals: code, mode: 'insensitive' } } });
+        const agency = referrer ? null : await this.prisma.agency.findUnique({ where: { code: code.toUpperCase() } });
+        referredById = referrer?.id ?? agency?.userId;
+        if (!referredById) throw new BadRequestException('Mã giới thiệu không hợp lệ');
+      }
     }
     const fullName = dto.full_name.trim();
-    const user = await this.prisma.user.create({
-      data: {
-        email,
-        fullName,
-        nickname: dto.nickname?.trim() || fullName,
-        passwordHash: await bcrypt.hash(dto.password, 12),
-        referredById,
-        termsAcceptedAt: new Date(),
-      },
-    });
+    const generatedReferralCode = await this.uniqueReferralCode();
+    let user: User;
+    try {
+      user = await this.prisma.$transaction(async (tx) => {
+        const created = await tx.user.create({
+          data: {
+            email,
+            fullName,
+            nickname: dto.nickname?.trim() || fullName,
+            passwordHash: await bcrypt.hash(dto.password, 12),
+            referralCode: generatedReferralCode,
+            referredById,
+            termsAcceptedAt: new Date(),
+          },
+        });
+        if (systemCodeId) {
+          const claimed = await tx.systemReferralCode.updateMany({
+            where: { id: systemCodeId, isActive: true, claimedById: null },
+            data: { claimedById: created.id, claimedAt: new Date(), isActive: false },
+          });
+          if (claimed.count !== 1) throw new BadRequestException('Mã đầu nhánh đã được sử dụng');
+        }
+        return created;
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Email hoặc mã giới thiệu đã tồn tại');
+      }
+      throw error;
+    }
     let otpDelivery;
     try {
       otpDelivery = await this.requestOtp(email, 'register');
     } catch (error) {
       await this.prisma.user.delete({ where: { id: user.id } }).catch(() => undefined);
+      if (systemCodeId) {
+        await this.prisma.systemReferralCode.update({
+          where: { id: systemCodeId },
+          data: { claimedById: null, claimedAt: null, isActive: true },
+        }).catch(() => undefined);
+      }
       throw error;
     }
     return { user: userView(user), verification_required: true, otp: otpDelivery };

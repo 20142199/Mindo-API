@@ -488,3 +488,43 @@ dd { color: var(--navy); font-size: 13px; font-weight: 500; }
   .password-toggle svg { width: 20px; height: 20px; }
   .login-submit { min-height: 56px; border-radius: 16px; }
 }
+
+.page-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
+.page-title-row h1 { margin-bottom: 7px; }
+.page-title-row p, .panel-title p, .table-heading p { margin: 0; color: var(--muted); font-size: 12px; line-height: 20px; }
+.success-banner { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; padding: 11px 14px; border: 1px solid #b9ddd9; border-radius: 11px; color: #0b5a55; background: #eaf7f5; font-size: 12px; }
+.referral-config-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(320px, .75fr); gap: 18px; margin-bottom: 18px; }
+.referral-config-card { display: flex; flex-direction: column; gap: 18px; padding: 22px; overflow: visible; }
+.panel-title { display: flex; align-items: flex-start; gap: 12px; }
+.panel-title-icon { width: 40px; height: 40px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 12px; color: var(--navy); background: #eaf1f8; }
+.panel-title h2 { margin: 1px 0 5px; color: var(--navy); }
+.rate-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.rate-fields label, .system-code-label { display: grid; gap: 8px; color: #334a68; font-size: 12px; font-weight: 600; }
+.rate-fields small, .updated-note { color: var(--muted); font-size: 10px; font-weight: 400; line-height: 17px; }
+.percent-input { min-height: 48px; display: flex; align-items: center; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface-soft); }
+.percent-input input { width: 100%; min-width: 0; padding: 0 13px; border: 0; outline: 0; color: var(--navy); background: transparent; }
+.percent-input b { align-self: stretch; display: grid; place-items: center; min-width: 46px; border-left: 1px solid var(--border); color: var(--muted); background: #fff; }
+.system-code-label input { min-height: 48px; padding: 0 13px; border: 1px solid var(--border); border-radius: 12px; outline: 0; color: var(--navy); background: var(--surface-soft); }
+.percent-input:focus-within, .system-code-label input:focus { border-color: #99abc1; box-shadow: 0 0 0 4px rgba(2,28,65,.045); background: #fff; }
+.referral-config-card .primary-button { align-self: flex-start; }
+.referral-table-panel .table-heading { display: flex; justify-content: space-between; }
+.referral-table-panel .table-heading h2 { margin-bottom: 5px; }
+.code-cell { display: grid; gap: 3px; }
+.code-cell strong { letter-spacing: .045em; }
+.muted-cell { color: var(--muted); }
+.row-actions { display: flex; align-items: center; gap: 13px; }
+.row-actions .text-button { display: inline-flex; align-items: center; gap: 5px; }
+
+@media (max-width: 1100px) {
+  .referral-config-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  .page-title-row { display: grid; }
+  .page-title-row .outline-button { width: max-content; }
+  .referral-metrics { grid-template-columns: 1fr 1fr; }
+  .referral-metrics .metric { align-items: flex-start; padding: 16px 14px; }
+  .referral-metrics .metric small { min-height: 32px; white-space: normal; line-height: 16px; }
+  .rate-fields { grid-template-columns: 1fr; }
+  .referral-config-card { padding: 18px; }
+}

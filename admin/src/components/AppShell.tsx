@@ -1,13 +1,14 @@
-import { Bell, Bot, ChevronDown, FileText, Home, Landmark, PanelLeftClose, ShieldCheck, Store, Users, WalletCards, Waypoints } from 'lucide-react';
+import { Bell, Bot, ChevronDown, FileText, GitBranch, Home, Landmark, PanelLeftClose, ShieldCheck, Store, Users, WalletCards, Waypoints } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { BrandMark } from './BrandMark';
 
-export type RouteName = 'dashboard' | 'kyc' | 'agencies' | 'ai-experts' | 'accounts';
+export type RouteName = 'dashboard' | 'kyc' | 'agencies' | 'referrals' | 'ai-experts' | 'accounts';
 
 const nav = [
   { label: 'Tổng quan', icon: Home, route: 'dashboard' as RouteName },
   { label: 'Người dùng & KYC', icon: Users, route: 'kyc' as RouteName },
   { label: 'Đại lý', icon: Store, route: 'agencies' as RouteName },
+  { label: 'Giới thiệu', icon: GitBranch, route: 'referrals' as RouteName },
   { label: 'AI chuyên gia', icon: Bot, route: 'ai-experts' as RouteName },
   { label: 'Nạp tiền', icon: WalletCards },
   { label: 'NFT', icon: Landmark },
@@ -20,6 +21,7 @@ const routeMeta: Record<RouteName, { title: string; description: string }> = {
   dashboard: { title: 'Tổng quan', description: 'Trung tâm vận hành Mindo' },
   kyc: { title: 'Người dùng & KYC', description: 'Xác minh hồ sơ khách hàng' },
   agencies: { title: 'Đại lý', description: 'Quản lý mạng lưới kinh doanh' },
+  referrals: { title: 'Hệ thống giới thiệu', description: 'Cấu hình thưởng và theo dõi đầu nhánh' },
   'ai-experts': { title: 'AI chuyên gia', description: 'Cấu hình trợ lý Mindo' },
   accounts: { title: 'Phân quyền', description: 'Quản trị tài khoản nội bộ' },
 };
@@ -31,7 +33,7 @@ export function AppShell({ route, onNavigate, children }: { route: RouteName; on
         <div className="brand"><BrandMark /><span className="brand-copy"><strong>Mindo</strong><small>Admin Portal</small></span></div>
         <nav aria-label="Điều hướng chính">
           {nav.map(({ label, icon: Icon, route: itemRoute }) => (
-            <button key={label} className={itemRoute === route ? 'nav-item active' : 'nav-item'} onClick={() => itemRoute && onNavigate(itemRoute)} disabled={!itemRoute}>
+            <button key={label} aria-label={label} className={itemRoute === route ? 'nav-item active' : 'nav-item'} onClick={() => itemRoute && onNavigate(itemRoute)} disabled={!itemRoute}>
               <Icon size={20} strokeWidth={1.8} /><span>{label}</span>
             </button>
           ))}

@@ -8,6 +8,7 @@ import { FileStorageService } from './file-storage.service';
 import { CreateArticleDto, CreateDepositDto, CreateKycDto, CreateNftProductDto, ReviewDto, VietQrCallbackDto } from './phase1.dto';
 import { requireAvailableSupply } from './domain';
 import { generateNumericOrderId, VietQrService } from './vietqr.service';
+import { ReferralService } from '../referral/referral.service';
 
 @Injectable()
 export class Phase1Service {
@@ -16,6 +17,7 @@ export class Phase1Service {
     private readonly jwt: JwtService,
     private readonly files: FileStorageService,
     private readonly vietQr: VietQrService,
+    private readonly referrals: ReferralService,
   ) {}
 
   async createKyc(userId: string, dto: CreateKycDto) {
@@ -347,6 +349,8 @@ export class Phase1Service {
           data: { userId: agency.userId, amountVnd: created.commissionVnd, direction: 'CREDIT', description: `Hoa hồng đại lý đơn ${created.id}`, commissionId: commission.id },
         });
       }
+
+      await this.referrals.applyPurchaseCommissions(tx, created, user);
 
       await tx.auditLog.create({
         data: { actorId: userId, action: 'NFT_INTERNAL_ISSUED', entityType: 'PurchaseOrder', entityId: created.id, metadata: { quantity: quote.amount, productId: product.id } },

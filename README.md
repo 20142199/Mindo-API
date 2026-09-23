@@ -18,6 +18,7 @@ The platform includes the Phase 1 core plus the Phase 2 agency, commission, AI e
 - AI experts, conversation history, queued responses, image/document/translation task types, and SSE updates
 - Agora audio/video calls, online signaling, active-call recovery, timeout handling, and call history
 - Friend requests by email or phone with user-ID-based relationships
+- User referral codes, configurable direct rewards, and system-issued branch-root sales rewards
 - Admin agency operations, AI expert configuration, and role-based Admin account management
 
 ## Local setup
@@ -37,6 +38,7 @@ The account profile, avatar, preferences, signed-in sessions, and app KYC contra
 The NFT purchase and VietQR deposit history contract is documented in [`docs/history-api.md`](docs/history-api.md).
 The Agora audio/video calling flow and app integration contract is documented in [`docs/call-api.md`](docs/call-api.md).
 The email/phone friend request and user-ID relationship contract is documented in [`docs/friend-api.md`](docs/friend-api.md).
+The registration referral, branch dashboard, reward, and Admin configuration contract is documented in [`docs/referral-api.md`](docs/referral-api.md).
 
 ## OTP and KYC
 
@@ -80,6 +82,12 @@ With the local services and API running, `npm run test:e2e:calls -w api` verifie
 ## Friends
 
 Investors can send friend requests using an email address or phone number. The identifier is resolved once to an account; requests and accepted relationships use only user IDs. Accepted friendships are stored in both directions with a composite user-ID primary key for fast list and search queries. Run `npm run test:e2e:friends -w api` for the full local workflow.
+
+## Referral rewards
+
+Every newly registered account receives a readable, unique Mindo referral code. A registration can provide either another user's code or a one-time system code created by Admin. A system code marks that account as the root of an important branch and cannot be reused.
+
+When a purchase completes, the direct inviter receives the configured direct reward (10% by default). If the buyer belongs to a system-rooted branch, that root also receives the configured branch reward (5% by default) on the order. Both credits, their ledger entries, and the NFT issuance are committed in the same database transaction. Admin can change future-order rates, issue or disable system codes, and view each branch's complete downline sales.
 
 The local seed creates these development-only accounts:
 

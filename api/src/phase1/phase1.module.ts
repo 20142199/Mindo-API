@@ -5,9 +5,10 @@ import { Phase1Controller } from './phase1.controller';
 import { Phase1Service } from './phase1.service';
 import { VietQrService } from './vietqr.service';
 import { VietQrController } from './vietqr.controller';
+import { ReferralModule } from '../referral/referral.module';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, ReferralModule],
   controllers: [Phase1Controller, VietQrController],
   providers: [Phase1Service, FileStorageService, VietQrService],
   exports: [FileStorageService],
