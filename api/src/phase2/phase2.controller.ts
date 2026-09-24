@@ -9,6 +9,7 @@ import { AgencyService } from './agency.service';
 import { AiService } from './ai.service';
 import {
   AiConversationQueryDto,
+  AiMessageQueryDto,
   BuyAgencyPackageDto,
   CreateAdminAccountDto,
   CreateAgencyApplicationDto,
@@ -34,7 +35,10 @@ export class Phase2Controller {
   store(@Param('slug') slug: string) { return this.agencies.publicStore(slug).then((data) => ok(data)); }
 
   @Get('ai/experts')
-  experts() { return this.ai.experts().then((data) => ok(data)); }
+  experts(@Query('q') search?: string) { return this.ai.experts(true, search).then((data) => ok(data)); }
+
+  @Get('ai/config')
+  aiConfig() { return ok(this.ai.config()); }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Post('investor/agency/applications')
   apply(@Req() req: AuthenticatedRequest, @Body() dto: CreateAgencyApplicationDto) {
@@ -97,6 +101,16 @@ export class Phase2Controller {
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Post('investor/ai/conversations/:id/messages')
   message(@Req() req: AuthenticatedRequest, @Param('id') id: string, @Body() dto: CreateAiMessageDto) {
     return this.ai.sendMessage(authUser(req).id, id, dto).then((data) => ok(data, 'Đang xử lý yêu cầu AI'));
+  }
+
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('investor/ai/conversations/:id/messages')
+  messages(@Req() req: AuthenticatedRequest, @Param('id') id: string, @Query() query: AiMessageQueryDto) {
+    return this.ai.listMessages(authUser(req).id, id, query).then(({ data, extra }) => ok(data, 'Thành công', extra));
+  }
+
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Post('investor/ai/messages/:id/retry')
+  retryMessage(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+    return this.ai.retryMessage(authUser(req).id, id).then((data) => ok(data, 'Đang thử lại yêu cầu AI'));
   }
 
   /**

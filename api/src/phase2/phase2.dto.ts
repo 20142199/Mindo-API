@@ -68,14 +68,20 @@ export class AiConversationQueryDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(50) limit = 20;
 }
 
+export class AiMessageQueryDto {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page = 1;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit = 30;
+}
+
 export class RenameAiConversationDto {
   @IsString() @MinLength(1) @MaxLength(120) title!: string;
 }
 
 export class CreateAiMessageDto {
-  @IsString() @MinLength(1) content!: string;
+  @IsString() @MinLength(1) @MaxLength(4_000) content!: string;
   @IsOptional() @IsEnum(AiMessageKind) kind?: AiMessageKind;
-  @IsOptional() @IsString() target_language?: string;
+  @IsOptional() @IsString() @MaxLength(20) source_language?: string;
+  @IsOptional() @IsString() @MaxLength(20) target_language?: string;
   @IsOptional() @IsString() attachment_file_id?: string;
 }
 

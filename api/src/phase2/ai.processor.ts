@@ -7,6 +7,8 @@ export class AiProcessor extends WorkerHost {
   constructor(private readonly ai: AiService) { super(); }
 
   process(job: Job<{ messageId: string }>) {
-    return this.ai.processMessage(job.data.messageId);
+    const attempts = Number(job.opts.attempts ?? 1);
+    const finalAttempt = job.attemptsMade + 1 >= attempts;
+    return this.ai.processMessage(job.data.messageId, finalAttempt);
   }
 }

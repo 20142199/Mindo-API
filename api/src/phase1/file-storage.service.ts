@@ -41,6 +41,13 @@ export class FileStorageService {
     return file;
   }
 
+  async readOwned(ownerId: string, fileId: string) {
+    const file = await this.assertOwned(ownerId, fileId);
+    const target = path.resolve(this.baseDir, file.ownerId, file.storedName);
+    if (!target.startsWith(this.baseDir + path.sep)) throw new UnauthorizedException('Đường dẫn file không hợp lệ');
+    return { file, content: await readFile(target) };
+  }
+
   async resolveSignedContent(id: string, expiresValue: string, signature: string) {
     const expires = Number(expiresValue);
     if (!Number.isSafeInteger(expires) || expires <= Math.floor(Date.now() / 1000)) {
@@ -60,7 +67,10 @@ export class FileStorageService {
   }
 
   view(file: FileUpload) {
-    const expires = Math.floor(Date.now() / 1000) + Number(process.env.FILE_URL_TTL_SECONDS ?? 900);
+    const ttl = Math.max(60, Number(process.env.FILE_URL_TTL_SECONDS ?? 900));
+    // Giữ URL ổn định trong cùng một cửa sổ TTL để polling/SSE không phát lại
+    // chỉ vì chữ ký của file thay đổi từng giây.
+    const expires = (Math.floor(Date.now() / 1000 / ttl) + 2) * ttl;
     const baseUrl = (process.env.APP_URL ?? 'http://localhost:4000').replace(/\/$/, '');
     const publicUrl = `${baseUrl}/api/v1/files/${file.id}/content?expires=${expires}&signature=${this.signature(file.id, expires)}`;
     return {

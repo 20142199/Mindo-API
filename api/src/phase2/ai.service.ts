@@ -1,12 +1,21 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
-import { AiMessageKind, AiMessageRole, AiMessageStatus, Prisma } from '@prisma/client';
+import { AiMessage, AiMessageKind, AiMessageRole, AiMessageStatus, Prisma } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { pageExtra } from '../common/api-response';
 import { PrismaService } from '../common/prisma.module';
 import { FileStorageService } from '../phase1/file-storage.service';
-import { AiProviderService } from './ai-provider.service';
-import { AiConversationQueryDto, CreateAiConversationDto, CreateAiMessageDto, UpsertAiExpertDto } from './phase2.dto';
+import { AiContextMessage, AiProviderService } from './ai-provider.service';
+import { AiConversationQueryDto, AiMessageQueryDto, CreateAiConversationDto, CreateAiMessageDto, UpsertAiExpertDto } from './phase2.dto';
+
+const AI_LANGUAGES = [
+  { code: 'vi', label: 'Tiếng Việt' },
+  { code: 'en', label: 'English' },
+  { code: 'ja', label: '日本語' },
+  { code: 'ko', label: '한국어' },
+  { code: 'zh', label: '中文' },
+  { code: 'fr', label: 'Français' },
+] as const;
 
 @Injectable()
 export class AiService {
@@ -17,8 +26,26 @@ export class AiService {
     @InjectQueue('ai-response') private readonly queue: Queue,
   ) {}
 
-  experts(activeOnly = true) {
-    return this.prisma.aiExpert.findMany({ where: activeOnly ? { isActive: true } : {}, orderBy: [{ isActive: 'desc' }, { name: 'asc' }] });
+  experts(activeOnly = true, search?: string) {
+    const q = search?.trim();
+    const where: Prisma.AiExpertWhereInput = {
+      ...(activeOnly ? { isActive: true } : {}),
+      ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' } }, { specialty: { contains: q, mode: 'insensitive' } }] } : {}),
+    };
+    return this.prisma.aiExpert.findMany({ where, orderBy: [{ isActive: 'desc' }, { name: 'asc' }] });
+  }
+
+  config() {
+    return {
+      modes: [
+        { code: AiMessageKind.CHAT, label: 'Trò chuyện', credits: 1 },
+        { code: AiMessageKind.IMAGE, label: 'Tạo ảnh', credits: 1 },
+        { code: AiMessageKind.DOCUMENT, label: 'Tạo tài liệu', credits: 1 },
+        { code: AiMessageKind.TRANSLATION, label: 'Dịch thuật', credits: 1, max_characters: 1_000 },
+      ],
+      languages: AI_LANGUAGES,
+      upload: { max_size_bytes: 10 * 1024 * 1024, mime_types: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'] },
+    };
   }
 
   async createConversation(userId: string, dto: CreateAiConversationDto) {
@@ -94,19 +121,64 @@ export class AiService {
   async getConversation(userId: string, id: string) {
     const conversation = await this.prisma.aiConversation.findFirst({
       where: { id, userId },
-      include: { expert: true, messages: { orderBy: { createdAt: 'asc' } } },
+      include: { expert: true, messages: { orderBy: { createdAt: 'desc' }, take: 50 } },
     });
     if (!conversation) throw new NotFoundException('Cuộc trò chuyện không tồn tại');
-    return conversation;
+    const messages = await this.messageViews(conversation.messages.reverse());
+    return { ...conversation, messages };
+  }
+
+  async listMessages(userId: string, conversationId: string, query: AiMessageQueryDto) {
+    const exists = await this.prisma.aiConversation.findFirst({ where: { id: conversationId, userId }, select: { id: true } });
+    if (!exists) throw new NotFoundException('Cuộc trò chuyện không tồn tại');
+    const where = { conversationId };
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.aiMessage.count({ where }),
+      this.prisma.aiMessage.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      }),
+    ]);
+    return {
+      data: await this.messageViews(rows.reverse()),
+      extra: pageExtra(query.page, query.limit, total),
+    };
+  }
+
+  private async messageViews(messages: AiMessage[]) {
+    const attachmentIds = [...new Set(messages.flatMap((message) => {
+      const metadata = (message.metadata ?? {}) as Record<string, unknown>;
+      return typeof metadata.attachmentFileId === 'string' ? [metadata.attachmentFileId] : [];
+    }))];
+    const files = attachmentIds.length
+      ? await this.prisma.fileUpload.findMany({ where: { id: { in: attachmentIds } } })
+      : [];
+    const byId = new Map(files.map((file) => [file.id, this.files.view(file)]));
+    return messages.map((message) => {
+      const metadata = (message.metadata ?? {}) as Record<string, unknown>;
+      const attachment = typeof metadata.attachmentFileId === 'string' ? byId.get(metadata.attachmentFileId) : undefined;
+      return { ...message, attachment: attachment ?? null };
+    });
   }
 
   async sendMessage(userId: string, conversationId: string, dto: CreateAiMessageDto) {
     const conversation = await this.getConversation(userId, conversationId);
-    if (dto.attachment_file_id) await this.files.assertOwned(userId, dto.attachment_file_id);
     const kind = dto.kind ?? AiMessageKind.CHAT;
     const capabilities = Array.isArray(conversation.expert.capabilities) ? conversation.expert.capabilities.map(String) : [];
     if (!capabilities.includes(kind)) throw new BadRequestException('Chuyên gia này không hỗ trợ loại yêu cầu đã chọn');
-    if (kind === AiMessageKind.TRANSLATION && !dto.target_language?.trim()) throw new BadRequestException('Cần chọn ngôn ngữ đích');
+    const attachment = dto.attachment_file_id ? await this.files.assertOwned(userId, dto.attachment_file_id) : undefined;
+    if (attachment && kind === AiMessageKind.IMAGE) throw new BadRequestException('Chế độ tạo ảnh chưa hỗ trợ file đính kèm');
+    const sourceLanguage = dto.source_language ? this.language(dto.source_language) : undefined;
+    const targetLanguage = dto.target_language ? this.language(dto.target_language) : undefined;
+    if (kind === AiMessageKind.TRANSLATION && !targetLanguage) throw new BadRequestException('Cần chọn ngôn ngữ đích hợp lệ');
+    if (kind === AiMessageKind.TRANSLATION && dto.content.length > 1_000) throw new BadRequestException('Nội dung dịch không được vượt quá 1.000 ký tự');
+    const pending = await this.prisma.aiMessage.findFirst({
+      where: { conversationId, role: AiMessageRole.ASSISTANT, status: AiMessageStatus.PENDING },
+      select: { id: true },
+    });
+    if (pending) throw new ConflictException({ message: 'AI đang xử lý yêu cầu trước đó', code: 'AI_MESSAGE_PENDING', message_id: pending.id });
     const limit = this.dailyLimit();
     const dailyUsed = await this.countUsedToday(userId);
     /*
@@ -142,15 +214,44 @@ export class AiService {
           kind,
           status: AiMessageStatus.PENDING,
           content: '',
-          metadata: dto.target_language ? { targetLanguage: dto.target_language } : undefined,
+          metadata: {
+            requestedAt: new Date().toISOString(),
+            ...(sourceLanguage ? { sourceLanguage: sourceLanguage.code } : {}),
+            ...(targetLanguage ? { targetLanguage: targetLanguage.code } : {}),
+          },
         },
       });
       const title = conversation.messages.length === 0 ? dto.content.trim().slice(0, 70) : undefined;
       await tx.aiConversation.update({ where: { id: conversationId }, data: { ...(title ? { title } : {}), updatedAt: new Date() } });
       return { user_message: userMessage, assistant_message: assistantMessage };
     });
-    await this.queue.add('generate', { messageId: result.assistant_message.id }, { jobId: result.assistant_message.id, attempts: 3, backoff: { type: 'exponential', delay: 2_000 }, removeOnComplete: 500 });
+    try {
+      await this.enqueue(result.assistant_message.id, result.assistant_message.id);
+    } catch {
+      await this.prisma.aiMessage.update({
+        where: { id: result.assistant_message.id },
+        data: { status: AiMessageStatus.FAILED, errorMessage: 'Không thể xếp lịch xử lý AI', completedAt: new Date() },
+      });
+      throw new ServiceUnavailableException('Không thể xếp lịch xử lý AI');
+    }
     return result;
+  }
+
+  private language(value: string) {
+    const clean = value.trim().toLocaleLowerCase('vi');
+    const language = AI_LANGUAGES.find((item) => item.code === clean || item.label.toLocaleLowerCase('vi') === clean);
+    if (!language) throw new BadRequestException(`Ngôn ngữ không được hỗ trợ: ${value}`);
+    return language;
+  }
+
+  private enqueue(messageId: string, jobId: string) {
+    return this.queue.add('generate', { messageId }, {
+      jobId,
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 2_000 },
+      removeOnComplete: 500,
+      removeOnFail: 500,
+    });
   }
 
   /**
@@ -185,7 +286,7 @@ export class AiService {
     return { id, deleted: true };
   }
 
-  async processMessage(messageId: string) {
+  async processMessage(messageId: string, finalAttempt = true) {
     const message = await this.prisma.aiMessage.findUnique({
       where: { id: messageId },
       include: { conversation: { include: { expert: true } } },
@@ -193,21 +294,97 @@ export class AiService {
     if (!message || message.status === AiMessageStatus.COMPLETED) return message;
     const input = await this.prisma.aiMessage.findFirst({
       where: { conversationId: message.conversationId, role: AiMessageRole.USER, createdAt: { lte: message.createdAt } },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
     if (!input) throw new NotFoundException('Không tìm thấy yêu cầu AI');
     const metadata = (message.metadata ?? {}) as Record<string, unknown>;
     try {
-      const generated = await this.provider.generate(message.conversation.expert, message.kind, input.content, String(metadata.targetLanguage ?? ''));
+      const contextRows = await this.prisma.aiMessage.findMany({
+        where: {
+          conversationId: message.conversationId,
+          status: AiMessageStatus.COMPLETED,
+          role: { in: [AiMessageRole.USER, AiMessageRole.ASSISTANT] },
+          createdAt: { lte: input.createdAt },
+        },
+        select: { id: true, role: true, content: true },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: Number(process.env.AI_CONTEXT_MESSAGES ?? 20) + 1,
+      });
+      const history: AiContextMessage[] = contextRows
+        .filter((row) => row.id !== input.id)
+        .slice(0, Number(process.env.AI_CONTEXT_MESSAGES ?? 20))
+        .reverse()
+        .map((row) => ({
+          role: row.role === AiMessageRole.ASSISTANT ? 'assistant' : 'user',
+          content: row.content,
+        }));
+      const inputMetadata = (input.metadata ?? {}) as Record<string, unknown>;
+      const attachmentId = typeof inputMetadata.attachmentFileId === 'string' ? inputMetadata.attachmentFileId : undefined;
+      const storedAttachment = attachmentId ? await this.files.readOwned(message.conversation.userId, attachmentId) : undefined;
+      const generated = await this.provider.generate(message.conversation.expert, message.kind, input.content, {
+        sourceLanguage: typeof metadata.sourceLanguage === 'string' ? this.language(metadata.sourceLanguage).label : undefined,
+        targetLanguage: typeof metadata.targetLanguage === 'string' ? this.language(metadata.targetLanguage).label : undefined,
+        history,
+        attachment: storedAttachment ? {
+          name: storedAttachment.file.originalName,
+          mimeType: storedAttachment.file.mimeType,
+          content: storedAttachment.content,
+        } : undefined,
+      });
       return await this.prisma.aiMessage.update({
         where: { id: message.id },
-        data: { status: AiMessageStatus.COMPLETED, content: generated.content, attachmentUrl: generated.attachmentUrl, metadata: generated.metadata as Prisma.InputJsonValue | undefined, completedAt: new Date(), errorMessage: null },
+        data: {
+          status: AiMessageStatus.COMPLETED,
+          content: generated.content,
+          attachmentUrl: generated.attachmentUrl,
+          metadata: { ...metadata, ...(generated.metadata ?? {}) } as Prisma.InputJsonValue,
+          completedAt: new Date(),
+          errorMessage: null,
+        },
       });
     } catch (error) {
-      const reason = error instanceof Error ? error.message : 'AI provider error';
-      await this.prisma.aiMessage.update({ where: { id: message.id }, data: { status: AiMessageStatus.FAILED, errorMessage: reason, completedAt: new Date() } });
+      const reason = error instanceof Error ? error.message : 'Nhà cung cấp AI chưa thể trả lời';
+      await this.prisma.aiMessage.update({
+        where: { id: message.id },
+        data: {
+          status: finalAttempt ? AiMessageStatus.FAILED : AiMessageStatus.PENDING,
+          errorMessage: reason,
+          completedAt: finalAttempt ? new Date() : null,
+        },
+      });
       throw error;
     }
+  }
+
+  async retryMessage(userId: string, messageId: string) {
+    const message = await this.prisma.aiMessage.findFirst({
+      where: { id: messageId, role: AiMessageRole.ASSISTANT, conversation: { userId } },
+    });
+    if (!message) throw new NotFoundException('Tin nhắn AI không tồn tại');
+    if (message.status !== AiMessageStatus.FAILED) throw new ConflictException('Chỉ có thể thử lại tin nhắn đã thất bại');
+    const metadata = (message.metadata ?? {}) as Record<string, unknown>;
+    const updated = await this.prisma.aiMessage.updateMany({
+      where: { id: messageId, status: AiMessageStatus.FAILED },
+      data: {
+        status: AiMessageStatus.PENDING,
+        content: '',
+        attachmentUrl: null,
+        errorMessage: null,
+        completedAt: null,
+        metadata: { ...metadata, retryCount: Number(metadata.retryCount ?? 0) + 1, retriedAt: new Date().toISOString() } as Prisma.InputJsonValue,
+      },
+    });
+    if (!updated.count) throw new ConflictException('Tin nhắn đang được xử lý');
+    try {
+      await this.enqueue(messageId, `retry-${messageId}-${Date.now()}`);
+    } catch {
+      await this.prisma.aiMessage.update({
+        where: { id: messageId },
+        data: { status: AiMessageStatus.FAILED, errorMessage: 'Không thể xếp lịch thử lại', completedAt: new Date() },
+      });
+      throw new ServiceUnavailableException('Không thể xếp lịch thử lại');
+    }
+    return this.prisma.aiMessage.findUniqueOrThrow({ where: { id: messageId } });
   }
 
   async document(userId: string, messageId: string) {
