@@ -10,6 +10,7 @@ import { CallModule } from './call/call.module';
 import { PrismaModule } from './common/prisma.module';
 import { FriendModule } from './friend/friend.module';
 import { HistoryModule } from './history/history.module';
+import { NewsModule } from './news/news.module';
 import { Phase1Module } from './phase1/phase1.module';
 import { Phase2Module } from './phase2/phase2.module';
 import { ReferralModule } from './referral/referral.module';
@@ -32,6 +33,7 @@ import { HealthController } from './health.controller';
     Phase1Module,
     AccountModule,
     HistoryModule,
+    NewsModule,
     Phase2Module,
     ReferralModule,
   ],

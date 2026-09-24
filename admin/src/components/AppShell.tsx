@@ -2,7 +2,7 @@ import { Bell, Bot, ChevronDown, FileText, GitBranch, Home, Landmark, PanelLeftC
 import type { ReactNode } from 'react';
 import { BrandMark } from './BrandMark';
 
-export type RouteName = 'dashboard' | 'kyc' | 'agencies' | 'referrals' | 'ai-experts' | 'accounts';
+export type RouteName = 'dashboard' | 'kyc' | 'agencies' | 'referrals' | 'ai-experts' | 'news' | 'accounts';
 
 const nav = [
   { label: 'Tổng quan', icon: Home, route: 'dashboard' as RouteName },
@@ -13,7 +13,7 @@ const nav = [
   { label: 'Nạp tiền', icon: WalletCards },
   { label: 'NFT', icon: Landmark },
   { label: 'Giao dịch', icon: Waypoints },
-  { label: 'Tin tức', icon: FileText },
+  { label: 'Tin tức', icon: FileText, route: 'news' as RouteName },
   { label: 'Phân quyền', icon: ShieldCheck, route: 'accounts' as RouteName },
 ];
 
@@ -23,6 +23,7 @@ const routeMeta: Record<RouteName, { title: string; description: string }> = {
   agencies: { title: 'Đại lý', description: 'Quản lý mạng lưới kinh doanh' },
   referrals: { title: 'Hệ thống giới thiệu', description: 'Cấu hình thưởng và theo dõi đầu nhánh' },
   'ai-experts': { title: 'AI chuyên gia', description: 'Cấu hình trợ lý Mindo' },
+  news: { title: 'Trung tâm tin tức', description: 'Quản lý bài viết, Sóng và chuyên gia' },
   accounts: { title: 'Phân quyền', description: 'Quản trị tài khoản nội bộ' },
 };
 

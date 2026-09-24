@@ -9,6 +9,7 @@ import { AgenciesPage } from './pages/AgenciesPage';
 import { AdminAccountsPage } from './pages/AdminAccountsPage';
 import { AiExpertsPage } from './pages/AiExpertsPage';
 import { ReferralsPage } from './pages/ReferralsPage';
+import { NewsPage } from './pages/NewsPage';
 
 export default function App() {
   const [route, setRoute] = useState<RouteName>('dashboard');
@@ -21,6 +22,7 @@ export default function App() {
   else if (route === 'agencies') content = <AgenciesPage />;
   else if (route === 'referrals') content = <ReferralsPage />;
   else if (route === 'ai-experts') content = <AiExpertsPage />;
+  else if (route === 'news') content = <NewsPage />;
   else content = <AdminAccountsPage />;
   return <AppShell route={route} onNavigate={setRoute}>{content}</AppShell>;
 }

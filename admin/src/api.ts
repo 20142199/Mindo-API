@@ -109,6 +109,63 @@ export type SystemReferralCodeRow = {
   createdBy: { fullName: string; email: string };
 };
 
+export type NewsTopic = {
+  id: string;
+  name: string;
+  slug: string;
+  isActive: boolean;
+  sortOrder: number;
+  _count?: { articles: number; interests: number };
+};
+
+export type NewsExpert = {
+  id: string;
+  name: string;
+  slug: string;
+  specialty: string;
+  bio: string;
+  avatar_url?: string;
+  cover_url?: string;
+  initials: string;
+  is_verified: boolean;
+  is_active: boolean;
+  sort_order: number;
+  follower_count: number;
+  article_count: number;
+};
+
+export type NewsArticle = {
+  id: string;
+  title: string;
+  slug: string;
+  summary: string;
+  content: string;
+  image_url?: string;
+  video_url?: string;
+  source_url?: string;
+  content_type: 'ARTICLE' | 'WAVE';
+  status: 'DRAFT' | 'PUBLISHED' | 'HIDDEN';
+  published_at?: string;
+  created_at: string;
+  topic?: NewsTopic;
+  expert?: NewsExpert;
+  like_count: number;
+};
+
+export type SaveNewsArticle = {
+  title: string;
+  slug: string;
+  summary: string;
+  content: string;
+  image_url?: string;
+  video_url?: string;
+  source_url?: string;
+  content_type: 'ARTICLE' | 'WAVE';
+  status: 'DRAFT' | 'PUBLISHED' | 'HIDDEN';
+  topic_id?: string;
+  expert_id?: string;
+};
+
 type ApiEnvelope<T> = { data: T; message: string };
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000';
 const demoMode = import.meta.env.VITE_DEMO_MODE === 'true';
@@ -147,6 +204,20 @@ const demoExperts: AiExpert[] = [
   { id: 'e1', name: 'Minh Tâm', slug: 'mindo-tai-chinh', specialty: 'Tài chính cá nhân', description: 'Hỗ trợ kế hoạch tài chính và quản lý dòng tiền.', systemPrompt: 'Chuyên gia tài chính Mindo.', capabilities: ['CHAT', 'DOCUMENT'], isActive: true },
   { id: 'e2', name: 'An Nhiên', slug: 'mindo-suc-khoe', specialty: 'Sức khỏe tổng quát', description: 'Cung cấp thông tin sức khỏe phổ thông.', systemPrompt: 'Chuyên gia sức khỏe Mindo.', capabilities: ['CHAT', 'DOCUMENT', 'TRANSLATION'], isActive: true },
   { id: 'e3', name: 'Lam Anh', slug: 'mindo-sang-tao', specialty: 'Nội dung và hình ảnh', description: 'Hỗ trợ nội dung, hình ảnh và tài liệu.', systemPrompt: 'Chuyên gia sáng tạo Mindo.', capabilities: ['CHAT', 'IMAGE', 'DOCUMENT', 'TRANSLATION'], isActive: false },
+];
+
+const demoNewsTopics: NewsTopic[] = [
+  { id: 'nt1', name: 'Bất động sản', slug: 'bat-dong-san', isActive: true, sortOrder: 1, _count: { articles: 2, interests: 128 } },
+  { id: 'nt2', name: 'Tài chính cá nhân', slug: 'tai-chinh-ca-nhan', isActive: true, sortOrder: 2, _count: { articles: 1, interests: 96 } },
+  { id: 'nt3', name: 'Pháp lý', slug: 'phap-ly', isActive: true, sortOrder: 3, _count: { articles: 0, interests: 74 } },
+];
+const demoNewsExperts: NewsExpert[] = [
+  { id: 'ne1', name: 'Bất động sản 360', slug: 'bat-dong-san-360', specialty: 'Bất động sản & Đầu tư', bio: 'Phân tích thị trường căn hộ và cơ hội đầu tư.', initials: 'BĐ', is_verified: true, is_active: true, sort_order: 1, follower_count: 21300, article_count: 148 },
+  { id: 'ne2', name: 'Vốn & Dòng tiền', slug: 'von-dong-tien', specialty: 'Tài chính cá nhân', bio: 'Kiến thức quản lý dòng tiền rõ ràng, dễ áp dụng.', initials: 'VD', is_verified: true, is_active: true, sort_order: 2, follower_count: 12000, article_count: 86 },
+];
+const demoNewsArticles: NewsArticle[] = [
+  { id: 'na1', title: '5 sai lầm thường gặp khi đầu tư căn hộ cho thuê', slug: '5-sai-lam-dau-tu-can-ho', summary: 'Những lỗi cơ bản có thể khiến dòng tiền âm ngay trong năm đầu.', content: 'Đầu tư căn hộ cho thuê không khó, nhưng người mới thường mắc những lỗi cơ bản khiến dòng tiền âm ngay năm đầu.', image_url: 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=320&q=80', content_type: 'ARTICLE', status: 'PUBLISHED', published_at: new Date().toISOString(), created_at: new Date().toISOString(), topic: demoNewsTopics[0], expert: demoNewsExperts[0], like_count: 18 },
+  { id: 'na2', title: 'Cách đọc bảng giá căn hộ trong 60 giây', slug: 'cach-doc-bang-gia-can-ho', summary: 'Hiểu nhanh các chỉ số quan trọng trước khi xuống tiền.', content: 'Video hướng dẫn đọc bảng giá căn hộ.', image_url: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=320&q=80', video_url: 'https://example.test/wave.mp4', content_type: 'WAVE', status: 'DRAFT', created_at: new Date().toISOString(), topic: demoNewsTopics[0], expert: demoNewsExperts[0], like_count: 0 },
 ];
 
 export const demoData = {
@@ -237,4 +308,10 @@ export const api = {
   systemReferralCodes: () => demoMode ? Promise.resolve([] as SystemReferralCodeRow[]) : request<SystemReferralCodeRow[]>('/api/v1/admin/referrals/system-codes'),
   createSystemReferralCode: (label: string) => request<SystemReferralCodeRow>('/api/v1/admin/referrals/system-codes', { method: 'POST', body: JSON.stringify({ label: label || undefined }) }),
   setSystemReferralCodeActive: (id: string, isActive: boolean) => request(`/api/v1/admin/referrals/system-codes/${id}`, { method: 'PATCH', body: JSON.stringify({ is_active: isActive }) }),
+  newsArticles: () => demoMode ? Promise.resolve(demoNewsArticles) : request<NewsArticle[]>('/api/v1/admin/news/articles?limit=50'),
+  saveNewsArticle: (article: SaveNewsArticle & { id?: string }) => demoMode ? Promise.resolve({ ...demoNewsArticles[0], ...article, id: article.id ?? `demo-${Date.now()}` }) : request<NewsArticle>(article.id ? `/api/v1/admin/news/articles/${article.id}` : '/api/v1/admin/news/articles', { method: article.id ? 'PATCH' : 'POST', body: JSON.stringify(article) }),
+  newsTopics: () => demoMode ? Promise.resolve(demoNewsTopics) : request<NewsTopic[]>('/api/v1/admin/news/topics'),
+  saveNewsTopic: (topic: { id?: string; name: string; slug: string; is_active: boolean; sort_order: number }) => demoMode ? Promise.resolve({ id: topic.id ?? `demo-${Date.now()}`, name: topic.name, slug: topic.slug, isActive: topic.is_active, sortOrder: topic.sort_order }) : request<NewsTopic>(topic.id ? `/api/v1/admin/news/topics/${topic.id}` : '/api/v1/admin/news/topics', { method: topic.id ? 'PATCH' : 'POST', body: JSON.stringify(topic) }),
+  newsExperts: () => demoMode ? Promise.resolve(demoNewsExperts) : request<NewsExpert[]>('/api/v1/admin/news/experts'),
+  saveNewsExpert: (expert: { id?: string; name: string; slug: string; specialty: string; bio: string; avatar_url?: string; cover_url?: string; initials?: string; is_verified: boolean; is_active: boolean; sort_order: number }) => demoMode ? Promise.resolve({ ...demoNewsExperts[0], ...expert, id: expert.id ?? `demo-${Date.now()}` }) : request<NewsExpert>(expert.id ? `/api/v1/admin/news/experts/${expert.id}` : '/api/v1/admin/news/experts', { method: expert.id ? 'PATCH' : 'POST', body: JSON.stringify(expert) }),
 };

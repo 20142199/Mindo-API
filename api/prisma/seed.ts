@@ -150,6 +150,22 @@ async function main() {
     await prisma.aiExpert.upsert({ where: { slug: expert.slug }, update: expert, create: expert });
   }
 
+  const newsTopics = [
+    ['Bất động sản', 'bat-dong-san'], ['Vĩ mô', 'vi-mo'], ['Pháp lý', 'phap-ly'], ['Blockchain', 'blockchain'],
+    ['Tài sản số', 'tai-san-so'], ['Chứng khoán', 'chung-khoan'], ['Quản trị tài sản', 'quan-tri-tai-san'],
+    ['Khởi nghiệp', 'khoi-nghiep'], ['Tài chính cá nhân', 'tai-chinh-ca-nhan'],
+    ['Bất động sản công nghiệp', 'bat-dong-san-cong-nghiep'], ['Năng lượng và môi trường', 'nang-luong-moi-truong'],
+  ];
+  for (const [index, [name, slug]] of newsTopics.entries()) {
+    await prisma.newsTopic.upsert({ where: { slug }, update: { name, sortOrder: index + 1 }, create: { name, slug, sortOrder: index + 1 } });
+  }
+  const topic = await prisma.newsTopic.findUniqueOrThrow({ where: { slug: 'bat-dong-san' } });
+  const newsExpert = await prisma.newsExpert.upsert({
+    where: { slug: 'bat-dong-san-360' },
+    update: { name: 'Bất động sản 360', specialty: 'Bất động sản & Đầu tư' },
+    create: { name: 'Bất động sản 360', slug: 'bat-dong-san-360', specialty: 'Bất động sản & Đầu tư', bio: 'Phân tích thị trường căn hộ và cơ hội đầu tư.', initials: 'BĐ', isVerified: true, sortOrder: 1 },
+  });
+
   if ((await prisma.newsArticle.count()) === 0) {
     await prisma.newsArticle.create({
       data: {
@@ -157,6 +173,8 @@ async function main() {
         slug: 'mindo-phase-1-testnet',
         summary: 'Các luồng KYC, nạp tiền và NFT nội bộ đã sẵn sàng để thử nghiệm.',
         content: 'Bản thử nghiệm tập trung vào luồng người dùng, xác minh KYC, nạp tiền VND và nhận NFT trực tiếp trong tài khoản Mindo.',
+        topicId: topic.id,
+        expertId: newsExpert.id,
         status: ArticleStatus.PUBLISHED,
         publishedAt: new Date(),
       },

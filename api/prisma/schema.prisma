@@ -50,6 +50,17 @@ enum ArticleStatus {
   HIDDEN
 }
 
+enum NewsContentType {
+  ARTICLE
+  WAVE
+}
+
+enum NewsFeedbackType {
+  NOT_INTERESTED
+  HIDE_TOPIC
+  REPORT
+}
+
 enum AgencyStatus {
   PENDING
   APPROVED
@@ -173,6 +184,10 @@ model User {
   receivedFriendRequests       FriendRequest[]        @relation("FriendRequestRecipient")
   friendships                  Friendship[]           @relation("FriendshipOwner")
   friendOf                     Friendship[]           @relation("FriendshipTarget")
+  followedNewsExperts          NewsExpertFollow[]
+  newsInterests                NewsUserInterest[]
+  likedNewsArticles            NewsArticleLike[]
+  newsFeedback                 NewsArticleFeedback[]
 }
 
 model FriendRequest {
@@ -634,19 +649,115 @@ model AiMessage {
 }
 
 model NewsArticle {
-  id          String        @id @default(cuid())
+  id          String          @id @default(cuid())
   title       String
-  slug        String        @unique
+  slug        String          @unique
   summary     String
   content     String
   imageUrl    String?
+  videoUrl    String?
   sourceUrl   String?
-  status      ArticleStatus @default(DRAFT)
+  contentType NewsContentType @default(ARTICLE)
+  status      ArticleStatus   @default(DRAFT)
+  topicId     String?
+  expertId    String?
   publishedAt DateTime?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  topic       NewsTopic?      @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  expert      NewsExpert?     @relation(fields: [expertId], references: [id], onDelete: SetNull)
+  likes       NewsArticleLike[]
+  feedback    NewsArticleFeedback[]
 
   @@index([status, publishedAt])
+  @@index([topicId, status, publishedAt])
+  @@index([expertId, status, publishedAt])
+  @@index([contentType, status, publishedAt])
+}
+
+model NewsTopic {
+  id        String                @id @default(cuid())
+  name      String
+  slug      String                @unique
+  isActive  Boolean               @default(true)
+  sortOrder Int                   @default(0)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+  articles  NewsArticle[]
+  interests NewsUserInterest[]
+  feedback  NewsArticleFeedback[]
+
+  @@index([isActive, sortOrder])
+}
+
+model NewsExpert {
+  id         String             @id @default(cuid())
+  name       String
+  slug       String             @unique
+  specialty  String
+  bio        String
+  avatarUrl  String?
+  coverUrl   String?
+  initials   String
+  isVerified Boolean            @default(false)
+  isActive   Boolean            @default(true)
+  sortOrder  Int                @default(0)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  articles   NewsArticle[]
+  followers  NewsExpertFollow[]
+
+  @@index([isActive, sortOrder])
+}
+
+model NewsExpertFollow {
+  userId    String
+  expertId  String
+  createdAt DateTime   @default(now())
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expert    NewsExpert @relation(fields: [expertId], references: [id], onDelete: Cascade)
+
+  @@id([userId, expertId])
+  @@index([expertId, createdAt])
+}
+
+model NewsUserInterest {
+  userId    String
+  topicId   String
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topic     NewsTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@id([userId, topicId])
+  @@index([topicId])
+}
+
+model NewsArticleLike {
+  userId    String
+  articleId String
+  createdAt DateTime    @default(now())
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  article   NewsArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, articleId])
+  @@index([articleId, createdAt])
+}
+
+model NewsArticleFeedback {
+  id        String           @id @default(cuid())
+  userId    String
+  articleId String
+  topicId   String?
+  type      NewsFeedbackType
+  reason    String?
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  article   NewsArticle      @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  topic     NewsTopic?       @relation(fields: [topicId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, articleId, type])
+  @@index([articleId, type])
+  @@index([userId, type, createdAt])
 }
 
 model AuditLog {

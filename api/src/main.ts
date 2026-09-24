@@ -44,7 +44,7 @@ async function bootstrap() {
 
   const swagger = new DocumentBuilder()
     .setTitle('Mindo Phase 1 API')
-    .setDescription('Auth, KYC, VND deposits, NFT purchase, transaction history and news')
+    .setDescription('Auth, KYC, VND deposits, NFT purchase, transaction history, personalized news and expert profiles')
     .setVersion('0.1.0')
     .addBearerAuth()
     .build();
