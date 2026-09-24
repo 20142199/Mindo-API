@@ -3,6 +3,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { ArticleStatus, NewsContentType, NewsCrawlStatus } from '@prisma/client';
 import { PrismaService } from '../common/prisma.module';
 import { parseArticleHtml, parseListingHtml } from './html-news.parser';
+import { NewsAiSummaryService } from './news-ai-summary.service';
 import { sourceDefinition } from './news-source.definitions';
 import { UpdateNewsSourceDto } from './news.dto';
 
@@ -11,7 +12,10 @@ const MAX_HTML_BYTES = 3 * 1024 * 1024;
 
 @Injectable()
 export class NewsCrawlService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly aiSummary: NewsAiSummaryService,
+  ) {}
 
   listSources() {
     return this.prisma.newsSource.findMany({
@@ -62,7 +66,7 @@ export class NewsCrawlService {
       const keyed = candidates.map((candidate) => ({ ...candidate, externalKey: this.externalKey(candidate.url) }));
       const existing = keyed.length ? await this.prisma.newsArticle.findMany({
         where: { sourceId: id, externalKey: { in: keyed.map((row) => row.externalKey) } },
-        select: { externalKey: true },
+        select: { id: true, externalKey: true, title: true, sourceContent: true, aiSummary: true },
       }) : [];
       const existingKeys = new Set(existing.map((row) => row.externalKey));
       const fresh = keyed.filter((row) => !existingKeys.has(row.externalKey)).slice(0, source.maxItemsPerRun);
@@ -75,7 +79,7 @@ export class NewsCrawlService {
           await this.assertRobotsAllowed(candidate.url);
           const html = await this.fetchHtml(candidate.url, definition.allowedHosts);
           const article = parseArticleHtml(html, candidate.url, definition);
-          await this.prisma.newsArticle.create({
+          const created = await this.prisma.newsArticle.create({
             data: {
               title: article.title,
               slug: this.articleSlug(article.title, candidate.externalKey),
@@ -95,10 +99,34 @@ export class NewsCrawlService {
             },
           });
           imported += 1;
+          if (this.aiSummary.isConfigured()) {
+            try {
+              await this.summarizeArticle(created.id, article.title, article.content);
+            } catch (error) {
+              failed += 1;
+              errors.push(`${candidate.url} [AI]: ${this.errorMessage(error)}`);
+            }
+          }
         } catch (error) {
           failed += 1;
           errors.push(`${candidate.url}: ${this.errorMessage(error)}`);
         }
+      }
+
+      const missingSummaries = existing.filter((row) => !row.aiSummary && row.sourceContent);
+      if (this.aiSummary.isConfigured()) {
+        const retryLimit = Math.max(2, source.maxItemsPerRun - fresh.length);
+        for (const article of missingSummaries.slice(0, retryLimit)) {
+          try {
+            await this.summarizeArticle(article.id, article.title, article.sourceContent!);
+          } catch (error) {
+            failed += 1;
+            errors.push(`${article.title} [AI]: ${this.errorMessage(error)}`);
+          }
+        }
+      } else if (fresh.length || missingSummaries.length) {
+        failed += 1;
+        errors.push(`AI: ${this.aiSummary.configurationError()}`);
       }
 
       const skipped = candidates.length - fresh.length;
@@ -141,6 +169,11 @@ export class NewsCrawlService {
   private articleSlug(title: string, externalKey: string) {
     const value = title.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 90);
     return `${value || 'tin-tuc'}-${externalKey.slice(0, 10)}`;
+  }
+
+  private async summarizeArticle(id: string, title: string, sourceContent: string) {
+    const aiSummary = await this.aiSummary.summarize(title, sourceContent);
+    await this.prisma.newsArticle.update({ where: { id }, data: { aiSummary } });
   }
 
   private async fetchHtml(url: string, allowedHosts: string[]) {

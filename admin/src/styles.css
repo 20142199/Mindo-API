@@ -530,6 +530,11 @@ dd { color: var(--navy); font-size: 13px; font-weight: 500; }
 .source-material > header small { color: var(--muted); font-size: 10px; }
 .source-material > header a { display: inline-flex; align-items: center; gap: 5px; color: var(--navy); font-size: 11px; font-weight: 700; text-decoration: none; }
 .source-material > div { max-height: 360px; overflow: auto; padding: 16px; color: #30445d; font-size: 12px; line-height: 20px; white-space: pre-wrap; }
+.ai-news-summary { overflow: hidden; border: 1px solid #c9d9aa; border-radius: 14px; background: #f8fbf1; }
+.ai-news-summary > header { display: flex; align-items: center; gap: 10px; padding: 12px 15px; color: var(--navy); border-bottom: 1px solid #dfe9cb; background: #f0f6e5; }
+.ai-news-summary > header span { display: grid; gap: 2px; }
+.ai-news-summary > header small { color: var(--muted); font-size: 10px; }
+.ai-news-summary > div { padding: 15px; color: #30445d; font-size: 12px; line-height: 21px; white-space: pre-line; }
 .source-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 0 20px 20px; }
 .source-card { display: grid; gap: 14px; padding: 17px; border: 1px solid var(--border-soft); border-radius: 15px; background: #fff; }
 .source-card > header { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 10px; }

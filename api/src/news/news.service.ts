@@ -50,7 +50,7 @@ export class NewsService {
     const hidden = !admin && userId ? await this.hiddenFor(userId) : { articleIds: [], topicIds: [] };
     const where: Prisma.NewsArticleWhereInput = {
       ...(admin ? {} : { status: ArticleStatus.PUBLISHED }),
-      ...(query.q ? { OR: [{ title: { contains: query.q, mode: 'insensitive' } }, { summary: { contains: query.q, mode: 'insensitive' } }, { content: { contains: query.q, mode: 'insensitive' } }] } : {}),
+      ...(query.q ? { OR: [{ title: { contains: query.q, mode: 'insensitive' } }, { summary: { contains: query.q, mode: 'insensitive' } }, { aiSummary: { contains: query.q, mode: 'insensitive' } }, { content: { contains: query.q, mode: 'insensitive' } }] } : {}),
       ...(query.topic ? { topic: { slug: query.topic } } : {}),
       ...(query.expert ? { expert: { slug: query.expert } } : {}),
       ...(query.type ? { contentType: query.type } : {}),
@@ -78,7 +78,7 @@ export class NewsService {
     const query = keyword.trim();
     const [articles, experts] = await Promise.all([
       this.prisma.newsArticle.findMany({
-        where: { status: ArticleStatus.PUBLISHED, OR: [{ title: { contains: query, mode: 'insensitive' } }, { summary: { contains: query, mode: 'insensitive' } }, { topic: { name: { contains: query, mode: 'insensitive' } } }] },
+        where: { status: ArticleStatus.PUBLISHED, OR: [{ title: { contains: query, mode: 'insensitive' } }, { summary: { contains: query, mode: 'insensitive' } }, { aiSummary: { contains: query, mode: 'insensitive' } }, { topic: { name: { contains: query, mode: 'insensitive' } } }] },
         include: articleInclude,
         orderBy: { publishedAt: 'desc' },
         take: limit,
@@ -206,7 +206,7 @@ export class NewsService {
 
   private articleView(row: Prisma.NewsArticleGetPayload<{ include: typeof articleInclude }>, isLiked: boolean, admin = false) {
     return {
-      id: row.id, title: row.title, slug: row.slug, summary: row.summary, content: row.content,
+      id: row.id, title: row.title, slug: row.slug, summary: row.summary, ai_summary: row.aiSummary, content: row.content,
       image_url: row.imageUrl, video_url: row.videoUrl, source_url: row.sourceUrl, content_type: row.contentType,
       status: row.status, published_at: row.publishedAt, created_at: row.createdAt, updated_at: row.updatedAt,
       topic: row.topic, expert: row.expert ? this.expertView(row.expert, false) : null,

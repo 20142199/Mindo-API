@@ -49,6 +49,10 @@ Crawler chạy nền mỗi 5 phút và chỉ xử lý nguồn đã đến chu k�
 - Chống trùng bằng hash URL chuẩn hóa theo từng nguồn.
 - Bài mới luôn được lưu ở trạng thái `DRAFT`.
 - Toàn bộ văn bản trích từ thân bài nằm trong `source_content`, chỉ API Admin trả về. API ứng dụng không trả trường này.
+- Khi AI được cấu hình, crawler tự tổng hợp nội dung nguồn thành 4–5 câu tiếng Việt, lưu trong `ai_summary`; trường này được trả về ở cả API Admin và API ứng dụng.
+- Nếu AI tạm lỗi hoặc chưa được cấu hình, bài nguồn vẫn được lưu. Lần crawl sau sẽ thử bổ sung `ai_summary` cho các bài còn thiếu và không bao giờ lưu nội dung mô phỏng.
 - `content` là nội dung Mindo biên tập để xuất bản và được lưu tách biệt; crawler không ghi đè nội dung này.
 
 Đặt `NEWS_CRAWL_ENABLED=false` nếu cần tạm dừng lịch tự động. Nút “Crawl ngay” vẫn xếp job thủ công vào Redis.
+
+Để bật tổng hợp AI trên production, đặt `AI_MOCK=false`, cấu hình `AI_API_KEY`, và có thể chọn model riêng bằng `NEWS_AI_SUMMARY_MODEL`.

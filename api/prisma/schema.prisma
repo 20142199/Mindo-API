@@ -655,38 +655,39 @@ model AiMessage {
 }
 
 model NewsArticle {
-  id          String          @id @default(cuid())
-  title       String
-  slug        String          @unique
-  summary     String
-  content     String
-  imageUrl    String?
-  videoUrl    String?
-  sourceUrl   String?
-  contentType NewsContentType @default(ARTICLE)
-  status      ArticleStatus   @default(DRAFT)
-  topicId     String?
-  expertId    String?
-  sourceId    String?
-  externalKey String?
-  sourceAuthor String?
-  sourceContent String?
+  id                String                @id @default(cuid())
+  title             String
+  slug              String                @unique
+  summary           String
+  aiSummary         String?
+  content           String
+  imageUrl          String?
+  videoUrl          String?
+  sourceUrl         String?
+  contentType       NewsContentType       @default(ARTICLE)
+  status            ArticleStatus         @default(DRAFT)
+  topicId           String?
+  expertId          String?
+  sourceId          String?
+  externalKey       String?
+  sourceAuthor      String?
+  sourceContent     String?
   sourcePublishedAt DateTime?
-  sourceFetchedAt DateTime?
-  publishedAt DateTime?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-  topic       NewsTopic?      @relation(fields: [topicId], references: [id], onDelete: SetNull)
-  expert      NewsExpert?     @relation(fields: [expertId], references: [id], onDelete: SetNull)
-  source      NewsSource?     @relation(fields: [sourceId], references: [id], onDelete: SetNull)
-  likes       NewsArticleLike[]
-  feedback    NewsArticleFeedback[]
+  sourceFetchedAt   DateTime?
+  publishedAt       DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  topic             NewsTopic?            @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  expert            NewsExpert?           @relation(fields: [expertId], references: [id], onDelete: SetNull)
+  source            NewsSource?           @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  likes             NewsArticleLike[]
+  feedback          NewsArticleFeedback[]
 
+  @@unique([sourceId, externalKey])
   @@index([status, publishedAt])
   @@index([topicId, status, publishedAt])
   @@index([expertId, status, publishedAt])
   @@index([contentType, status, publishedAt])
-  @@unique([sourceId, externalKey])
   @@index([sourceId, sourcePublishedAt])
 }
 
@@ -714,17 +715,17 @@ model NewsSource {
 }
 
 model NewsCrawlRun {
-  id          String          @id @default(cuid())
-  sourceId    String
-  status      NewsCrawlStatus @default(RUNNING)
-  discovered  Int             @default(0)
-  imported    Int             @default(0)
-  skipped     Int             @default(0)
-  failed      Int             @default(0)
+  id           String          @id @default(cuid())
+  sourceId     String
+  status       NewsCrawlStatus @default(RUNNING)
+  discovered   Int             @default(0)
+  imported     Int             @default(0)
+  skipped      Int             @default(0)
+  failed       Int             @default(0)
   errorMessage String?
-  startedAt   DateTime        @default(now())
-  completedAt DateTime?
-  source      NewsSource      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  startedAt    DateTime        @default(now())
+  completedAt  DateTime?
+  source       NewsSource      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
 
   @@index([sourceId, startedAt])
   @@index([status, startedAt])

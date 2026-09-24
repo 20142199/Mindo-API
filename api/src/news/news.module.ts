@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { AdminNewsController, NewsController } from './news.controller';
+import { NewsAiSummaryService } from './news-ai-summary.service';
 import { NewsService } from './news.service';
 import { OptionalJwtGuard } from './optional-jwt.guard';
 import { NEWS_CRAWL_QUEUE } from './news-crawl.constants';
@@ -12,6 +13,6 @@ import { NewsCrawlService } from './news-crawl.service';
 @Module({
   imports: [AuthModule, BullModule.registerQueue({ name: NEWS_CRAWL_QUEUE })],
   controllers: [NewsController, AdminNewsController],
-  providers: [NewsService, OptionalJwtGuard, NewsCrawlService, NewsCrawlProcessor, NewsCrawlScheduler],
+  providers: [NewsService, OptionalJwtGuard, NewsAiSummaryService, NewsCrawlService, NewsCrawlProcessor, NewsCrawlScheduler],
 })
 export class NewsModule {}
