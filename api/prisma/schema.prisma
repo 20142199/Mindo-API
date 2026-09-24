@@ -670,6 +670,7 @@ model NewsArticle {
   expertId          String?
   sourceId          String?
   externalKey       String?
+  sourceTitle       String?
   sourceAuthor      String?
   sourceContent     String?
   sourcePublishedAt DateTime?

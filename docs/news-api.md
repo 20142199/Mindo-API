@@ -40,7 +40,7 @@ Tất cả yêu cầu access token của tài khoản `ADMIN`.
 
 `content_type` nhận `ARTICLE` hoặc `WAVE`. Nội dung `WAVE` bắt buộc có `video_url`. Trạng thái gồm `DRAFT`, `PUBLISHED`, `HIDDEN`; lần đầu chuyển sang `PUBLISHED`, hệ thống tự ghi nhận `published_at`.
 
-## Crawl HTML làm nguồn tham khảo
+## Crawl HTML và biên tập tiếng Việt bằng AI
 
 Crawler chạy nền mỗi 5 phút và chỉ xử lý nguồn đã đến chu kỳ cấu hình. Danh sách hiện có: Investing.com, Forex Factory, CME Group, ICE, Yahoo Finance, Federal Reserve, ECB, IMF, World Bank và OPEC.
 
@@ -48,11 +48,13 @@ Crawler chạy nền mỗi 5 phút và chỉ xử lý nguồn đã đến chu k�
 - Không vượt đăng nhập, paywall hay cơ chế chống bot. Lỗi HTTP/robots/selector được lưu vào nguồn và lần chạy để Admin theo dõi.
 - Chống trùng bằng hash URL chuẩn hóa theo từng nguồn.
 - Bài mới luôn được lưu ở trạng thái `DRAFT`.
-- Toàn bộ văn bản trích từ thân bài nằm trong `source_content`, chỉ API Admin trả về. API ứng dụng không trả trường này.
-- Khi AI được cấu hình, crawler tự tổng hợp nội dung nguồn thành 4–5 câu tiếng Việt, lưu trong `ai_summary`; trường này được trả về ở cả API Admin và API ứng dụng.
-- Nếu AI tạm lỗi hoặc chưa được cấu hình, bài nguồn vẫn được lưu. Lần crawl sau sẽ thử bổ sung `ai_summary` cho các bài còn thiếu và không bao giờ lưu nội dung mô phỏng.
-- `content` là nội dung Mindo biên tập để xuất bản và được lưu tách biệt; crawler không ghi đè nội dung này.
+- Tiêu đề và toàn bộ thân bài gốc nằm trong `source_title` và `source_content`; chỉ API Admin trả về. API ứng dụng không trả các trường này.
+- Khi AI được cấu hình, một lần biên tập tạo đồng bộ tiêu đề tiếng Việt, mô tả ngắn, tổng hợp 4–5 dòng (`ai_summary`) và bài viết đầy đủ (`content`).
+- `content` là nội dung tiếng Việt hiển thị trên site sau khi Admin duyệt và xuất bản. Bản AI mới luôn ở trạng thái `DRAFT` và Admin có thể chỉnh sửa trước khi đăng.
+- AI được yêu cầu giữ nguyên dữ kiện, tên riêng, số liệu và mốc thời gian; không dịch từng câu, không sao chép cách diễn đạt, không thêm dữ kiện hoặc lời khuyên tài chính.
+- Nếu AI tạm lỗi hoặc chưa được cấu hình, bài gốc vẫn được lưu. Lần crawl sau sẽ thử bổ sung bản biên tập cho các bài còn thiếu và không bao giờ lưu nội dung mô phỏng.
+- Crawler không ghi đè `content` đã có, nhờ đó nội dung Admin đã chỉnh sửa được giữ nguyên; nếu chỉ thiếu `ai_summary`, hệ thống chỉ bổ sung trường này.
 
 Đặt `NEWS_CRAWL_ENABLED=false` nếu cần tạm dừng lịch tự động. Nút “Crawl ngay” vẫn xếp job thủ công vào Redis.
 
-Để bật tổng hợp AI trên production, đặt `AI_MOCK=false`, cấu hình `AI_API_KEY`, và có thể chọn model riêng bằng `NEWS_AI_SUMMARY_MODEL`.
+Để bật biên tập AI trên production, đặt `AI_MOCK=false`, cấu hình `AI_API_KEY`, và có thể chọn model riêng bằng `NEWS_AI_SUMMARY_MODEL`. `NEWS_AI_EDITORIAL_MAX_TOKENS` điều chỉnh độ dài đầu ra, mặc định `3000`.

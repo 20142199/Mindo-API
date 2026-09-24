@@ -66,7 +66,7 @@ export class NewsCrawlService {
       const keyed = candidates.map((candidate) => ({ ...candidate, externalKey: this.externalKey(candidate.url) }));
       const existing = keyed.length ? await this.prisma.newsArticle.findMany({
         where: { sourceId: id, externalKey: { in: keyed.map((row) => row.externalKey) } },
-        select: { id: true, externalKey: true, title: true, sourceContent: true, aiSummary: true },
+        select: { id: true, externalKey: true, title: true, sourceContent: true, aiSummary: true, content: true },
       }) : [];
       const existingKeys = new Set(existing.map((row) => row.externalKey));
       const fresh = keyed.filter((row) => !existingKeys.has(row.externalKey)).slice(0, source.maxItemsPerRun);
@@ -89,6 +89,7 @@ export class NewsCrawlService {
               sourceUrl: article.url,
               sourceId: source.id,
               externalKey: candidate.externalKey,
+              sourceTitle: article.title,
               sourceAuthor: article.author,
               sourceContent: article.content,
               sourcePublishedAt: article.publishedAt,
@@ -101,7 +102,7 @@ export class NewsCrawlService {
           imported += 1;
           if (this.aiSummary.isConfigured()) {
             try {
-              await this.summarizeArticle(created.id, article.title, article.content);
+              await this.editorializeArticle(created.id, article.title, article.content, candidate.externalKey, true);
             } catch (error) {
               failed += 1;
               errors.push(`${candidate.url} [AI]: ${this.errorMessage(error)}`);
@@ -113,18 +114,18 @@ export class NewsCrawlService {
         }
       }
 
-      const missingSummaries = existing.filter((row) => !row.aiSummary && row.sourceContent);
+      const missingEditorials = existing.filter((row) => (!row.aiSummary || !row.content.trim()) && row.sourceContent);
       if (this.aiSummary.isConfigured()) {
         const retryLimit = Math.max(2, source.maxItemsPerRun - fresh.length);
-        for (const article of missingSummaries.slice(0, retryLimit)) {
+        for (const article of missingEditorials.slice(0, retryLimit)) {
           try {
-            await this.summarizeArticle(article.id, article.title, article.sourceContent!);
+            await this.editorializeArticle(article.id, article.title, article.sourceContent!, article.externalKey ?? this.externalKey(article.id), !article.content.trim());
           } catch (error) {
             failed += 1;
             errors.push(`${article.title} [AI]: ${this.errorMessage(error)}`);
           }
         }
-      } else if (fresh.length || missingSummaries.length) {
+      } else if (fresh.length || missingEditorials.length) {
         failed += 1;
         errors.push(`AI: ${this.aiSummary.configurationError()}`);
       }
@@ -171,9 +172,18 @@ export class NewsCrawlService {
     return `${value || 'tin-tuc'}-${externalKey.slice(0, 10)}`;
   }
 
-  private async summarizeArticle(id: string, title: string, sourceContent: string) {
-    const aiSummary = await this.aiSummary.summarize(title, sourceContent);
-    await this.prisma.newsArticle.update({ where: { id }, data: { aiSummary } });
+  private async editorializeArticle(id: string, sourceTitle: string, sourceContent: string, externalKey: string, replaceArticle: boolean) {
+    const draft = await this.aiSummary.createEditorialDraft(sourceTitle, sourceContent);
+    await this.prisma.newsArticle.update({
+      where: { id },
+      data: replaceArticle ? {
+        title: draft.title,
+        slug: this.articleSlug(draft.title, externalKey),
+        summary: draft.summary,
+        aiSummary: draft.aiSummary,
+        content: draft.content,
+      } : { aiSummary: draft.aiSummary },
+    });
   }
 
   private async fetchHtml(url: string, allowedHosts: string[]) {

@@ -213,6 +213,7 @@ export class NewsService {
       like_count: row._count.likes, is_liked: isLiked,
       ...(admin ? {
         source: row.source ? { id: row.source.id, key: row.source.key, name: row.source.name, base_url: row.source.baseUrl } : null,
+        source_title: row.sourceTitle,
         source_author: row.sourceAuthor,
         source_content: row.sourceContent,
         source_published_at: row.sourcePublishedAt,
