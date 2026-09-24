@@ -69,7 +69,7 @@ Each agency package is listed at 25 USD and converted to VND with an exchange ra
 
 AI messages are created with a pending assistant response and processed by the `ai-response` Redis queue. Conversation events are available over SSE. Supported task types are `CHAT`, `IMAGE`, `DOCUMENT`, and `TRANSLATION`. Generated Markdown documents have a protected download endpoint. The complete mobile contract, including search, paginated history, private attachments, usage metadata, and failed-message retry, is documented in [`docs/ai-chat-api.md`](docs/ai-chat-api.md).
 
-`AI_MOCK=true` is the safe local default. For a real OpenAI-compatible provider, set `AI_MOCK=false`, `AI_API_BASE_URL`, `AI_API_KEY`, and the chat/image model names. BullMQ retries provider errors and only marks the assistant message as failed after the final attempt.
+`AI_MOCK=true` is the safe local default. Production follows the Greenland provider strategy: Gemini Native is primary, DeepSeek Chat is the text fallback, and Gemini handles multimodal files and image generation. Set `GEMINI_API_KEY` and optionally `DEEPSEEK_API_KEY`; BullMQ retries provider errors and only marks the assistant message as failed after the final attempt.
 
 With the local services and API running, `npm run test:e2e:phase2 -w api` verifies agency approval, one-time contract creation, store activation, package discount, immediate internal NFT issuance and commission, internal NFT history/detail, AI queue/document output, and Admin account RBAC. Temporary records are removed afterward.
 

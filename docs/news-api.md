@@ -62,4 +62,4 @@ Crawler chạy nền mỗi 5 phút và chỉ xử lý nguồn đã đến chu k�
 
 Đặt `NEWS_CRAWL_ENABLED=false` nếu cần tạm dừng lịch tự động. Nút “Crawl ngay” vẫn xếp job thủ công vào Redis.
 
-Để bật biên tập AI trên production, đặt `AI_MOCK=false`, cấu hình `AI_API_KEY`, và có thể chọn model riêng bằng `NEWS_AI_SUMMARY_MODEL`. `NEWS_AI_EDITORIAL_MAX_TOKENS` điều chỉnh độ dài đầu ra, mặc định `3000`. Hệ thống chỉ dùng key sau thao tác xác nhận của Admin.
+Để bật biên tập AI trên production, đặt `AI_MOCK=false`, cấu hình `GEMINI_API_KEY` và có thể thêm `DEEPSEEK_API_KEY` làm dự phòng. `NEWS_AI_SUMMARY_MODEL` chọn model Gemini cho biên tập; `NEWS_AI_EDITORIAL_MAX_TOKENS` điều chỉnh độ dài đầu ra, mặc định `3000`. Hệ thống chỉ dùng key sau thao tác xác nhận của Admin.

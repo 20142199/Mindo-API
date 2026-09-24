@@ -54,13 +54,20 @@ Tin hoàn tất có metadata phục vụ giao diện: `model`, `input_tokens`, `
 
 ```ini
 AI_MOCK=true
-AI_API_BASE_URL=https://api.openai.com/v1
-AI_API_KEY=
-AI_CHAT_MODEL=gpt-4o-mini
-AI_IMAGE_MODEL=gpt-image-1
+LLM_PRIMARY_VENDOR=gemini
+LLM_FALLBACK_VENDOR=deepseek
+GEMINI_API_KEY=
+GEMINI_NATIVE_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+GEMINI_MODEL=gemini-3.5-flash-lite
+GEMINI_IMAGE_MODEL=gemini-3.1-flash-lite-image
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat
 AI_DAILY_MESSAGE_LIMIT=50
 AI_CONTEXT_MESSAGES=20
+AI_MAX_OUTPUT_TOKENS=2048
+AI_TEMPERATURE=0.4
 AI_TIMEOUT_MS=60000
 ```
 
-`AI_MOCK=true` không gọi dịch vụ ngoài và phù hợp để app tích hợp UI. Khi bật provider thật, hệ thống gửi tối đa `AI_CONTEXT_MESSAGES` tin hoàn tất gần nhất để AI giữ ngữ cảnh. Ảnh được gửi dưới dạng vision input và PDF được gửi bằng file content part của Chat Completions.
+`AI_MOCK=true` không gọi dịch vụ ngoài và phù hợp để app tích hợp UI. Khi bật provider thật, Gemini Native là provider chính và DeepSeek Chat là fallback, cùng cơ chế với Greenland. Hệ thống gửi tối đa `AI_CONTEXT_MESSAGES` tin hoàn tất gần nhất để giữ ngữ cảnh. Ảnh/PDF được gửi đa phương thức cho Gemini; hệ thống không âm thầm bỏ file để fallback sang DeepSeek. Sinh ảnh chỉ dùng Gemini Native.

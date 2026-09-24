@@ -50,6 +50,11 @@ export class AiService {
         { code: AiMessageKind.DOCUMENT, label: 'Tạo tài liệu', credits: 1 },
         { code: AiMessageKind.TRANSLATION, label: 'Dịch thuật', credits: 1, max_characters: 1_000 },
       ],
+      providers: {
+        primary: process.env.LLM_PRIMARY_VENDOR ?? 'gemini',
+        fallback: process.env.LLM_FALLBACK_VENDOR ?? 'deepseek',
+        image: 'gemini',
+      },
       languages: AI_LANGUAGES,
       upload: { max_size_bytes: 10 * 1024 * 1024, mime_types: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'] },
     };
