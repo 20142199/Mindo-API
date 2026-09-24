@@ -150,6 +150,41 @@ export type NewsArticle = {
   topic?: NewsTopic;
   expert?: NewsExpert;
   like_count: number;
+  source?: { id: string; key: string; name: string; base_url: string };
+  source_author?: string;
+  source_content?: string;
+  source_published_at?: string;
+  source_fetched_at?: string;
+};
+
+export type NewsCrawlRun = {
+  id: string;
+  status: 'RUNNING' | 'SUCCESS' | 'FAILED';
+  discovered: number;
+  imported: number;
+  skipped: number;
+  failed: number;
+  errorMessage?: string;
+  startedAt: string;
+  completedAt?: string;
+};
+
+export type NewsSource = {
+  id: string;
+  key: string;
+  name: string;
+  baseUrl: string;
+  listingUrl: string;
+  isActive: boolean;
+  crawlIntervalMinutes: number;
+  maxItemsPerRun: number;
+  topicId?: string;
+  lastCrawledAt?: string;
+  lastSuccessAt?: string;
+  lastError?: string;
+  topic?: NewsTopic;
+  _count: { articles: number; crawlRuns: number };
+  crawlRuns: NewsCrawlRun[];
 };
 
 export type SaveNewsArticle = {
@@ -216,9 +251,16 @@ const demoNewsExperts: NewsExpert[] = [
   { id: 'ne2', name: 'Vốn & Dòng tiền', slug: 'von-dong-tien', specialty: 'Tài chính cá nhân', bio: 'Kiến thức quản lý dòng tiền rõ ràng, dễ áp dụng.', initials: 'VD', is_verified: true, is_active: true, sort_order: 2, follower_count: 12000, article_count: 86 },
 ];
 const demoNewsArticles: NewsArticle[] = [
-  { id: 'na1', title: '5 sai lầm thường gặp khi đầu tư căn hộ cho thuê', slug: '5-sai-lam-dau-tu-can-ho', summary: 'Những lỗi cơ bản có thể khiến dòng tiền âm ngay trong năm đầu.', content: 'Đầu tư căn hộ cho thuê không khó, nhưng người mới thường mắc những lỗi cơ bản khiến dòng tiền âm ngay năm đầu.', image_url: 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=320&q=80', content_type: 'ARTICLE', status: 'PUBLISHED', published_at: new Date().toISOString(), created_at: new Date().toISOString(), topic: demoNewsTopics[0], expert: demoNewsExperts[0], like_count: 18 },
+  { id: 'na1', title: '5 sai lầm thường gặp khi đầu tư căn hộ cho thuê', slug: '5-sai-lam-dau-tu-can-ho', summary: 'Những lỗi cơ bản có thể khiến dòng tiền âm ngay trong năm đầu.', content: 'Đầu tư căn hộ cho thuê không khó, nhưng người mới thường mắc những lỗi cơ bản khiến dòng tiền âm ngay năm đầu.', image_url: 'https://images.unsplash.com/photo-1560518883-ce09059eeffa?auto=format&fit=crop&w=320&q=80', source_url: 'https://example.com/news/source-article', source: { id: 'source-1', key: 'investing', name: 'Investing.com', base_url: 'https://www.investing.com' }, source_author: 'Ban biên tập nguồn', source_content: 'Đây là toàn bộ phần nội dung được lấy từ bài viết nguồn để biên tập viên Mindo đọc, đối chiếu số liệu và viết lại thành bài riêng. Nội dung này chỉ hiển thị trong trang quản trị, không được trả về API công khai và không tự động xuất bản.', source_published_at: new Date().toISOString(), source_fetched_at: new Date().toISOString(), content_type: 'ARTICLE', status: 'PUBLISHED', published_at: new Date().toISOString(), created_at: new Date().toISOString(), topic: demoNewsTopics[0], expert: demoNewsExperts[0], like_count: 18 },
   { id: 'na2', title: 'Cách đọc bảng giá căn hộ trong 60 giây', slug: 'cach-doc-bang-gia-can-ho', summary: 'Hiểu nhanh các chỉ số quan trọng trước khi xuống tiền.', content: 'Video hướng dẫn đọc bảng giá căn hộ.', image_url: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=320&q=80', video_url: 'https://example.test/wave.mp4', content_type: 'WAVE', status: 'DRAFT', created_at: new Date().toISOString(), topic: demoNewsTopics[0], expert: demoNewsExperts[0], like_count: 0 },
 ];
+const demoNewsSources: NewsSource[] = ['Investing.com', 'Forex Factory', 'CME Group', 'ICE', 'Yahoo Finance', 'Federal Reserve', 'European Central Bank', 'International Monetary Fund', 'World Bank', 'OPEC'].map((name, index) => ({
+  id: `source-${index + 1}`, key: name.toLowerCase().replace(/\s+/g, '-'), name,
+  baseUrl: 'https://example.com', listingUrl: 'https://example.com/news', isActive: true,
+  crawlIntervalMinutes: index < 2 ? 120 : 180, maxItemsPerRun: 8,
+  lastCrawledAt: index < 3 ? new Date(Date.now() - index * 3600000).toISOString() : undefined,
+  _count: { articles: index * 3, crawlRuns: index + 1 }, crawlRuns: [],
+}));
 
 export const demoData = {
   metrics: { kyc_pending: 28, deposits_pending: 41, nft_sold: 1256, transactions_need_review: 17 },
@@ -309,9 +351,21 @@ export const api = {
   createSystemReferralCode: (label: string) => request<SystemReferralCodeRow>('/api/v1/admin/referrals/system-codes', { method: 'POST', body: JSON.stringify({ label: label || undefined }) }),
   setSystemReferralCodeActive: (id: string, isActive: boolean) => request(`/api/v1/admin/referrals/system-codes/${id}`, { method: 'PATCH', body: JSON.stringify({ is_active: isActive }) }),
   newsArticles: () => demoMode ? Promise.resolve(demoNewsArticles) : request<NewsArticle[]>('/api/v1/admin/news/articles?limit=50'),
-  saveNewsArticle: (article: SaveNewsArticle & { id?: string }) => demoMode ? Promise.resolve({ ...demoNewsArticles[0], ...article, id: article.id ?? `demo-${Date.now()}` }) : request<NewsArticle>(article.id ? `/api/v1/admin/news/articles/${article.id}` : '/api/v1/admin/news/articles', { method: article.id ? 'PATCH' : 'POST', body: JSON.stringify(article) }),
+  saveNewsArticle: (article: SaveNewsArticle & { id?: string }) => {
+    if (demoMode) return Promise.resolve({ ...demoNewsArticles[0], ...article, id: article.id ?? `demo-${Date.now()}` });
+    const payload = {
+      title: article.title, slug: article.slug, summary: article.summary, content: article.content,
+      image_url: article.image_url || undefined, video_url: article.video_url || undefined, source_url: article.source_url || undefined,
+      content_type: article.content_type, status: article.status, topic_id: article.topic_id || undefined, expert_id: article.expert_id || undefined,
+    };
+    return request<NewsArticle>(article.id ? `/api/v1/admin/news/articles/${article.id}` : '/api/v1/admin/news/articles', { method: article.id ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
+  },
   newsTopics: () => demoMode ? Promise.resolve(demoNewsTopics) : request<NewsTopic[]>('/api/v1/admin/news/topics'),
   saveNewsTopic: (topic: { id?: string; name: string; slug: string; is_active: boolean; sort_order: number }) => demoMode ? Promise.resolve({ id: topic.id ?? `demo-${Date.now()}`, name: topic.name, slug: topic.slug, isActive: topic.is_active, sortOrder: topic.sort_order }) : request<NewsTopic>(topic.id ? `/api/v1/admin/news/topics/${topic.id}` : '/api/v1/admin/news/topics', { method: topic.id ? 'PATCH' : 'POST', body: JSON.stringify(topic) }),
   newsExperts: () => demoMode ? Promise.resolve(demoNewsExperts) : request<NewsExpert[]>('/api/v1/admin/news/experts'),
   saveNewsExpert: (expert: { id?: string; name: string; slug: string; specialty: string; bio: string; avatar_url?: string; cover_url?: string; initials?: string; is_verified: boolean; is_active: boolean; sort_order: number }) => demoMode ? Promise.resolve({ ...demoNewsExperts[0], ...expert, id: expert.id ?? `demo-${Date.now()}` }) : request<NewsExpert>(expert.id ? `/api/v1/admin/news/experts/${expert.id}` : '/api/v1/admin/news/experts', { method: expert.id ? 'PATCH' : 'POST', body: JSON.stringify(expert) }),
+  newsSources: () => demoMode ? Promise.resolve(demoNewsSources) : request<NewsSource[]>('/api/v1/admin/news/sources'),
+  saveNewsSource: (source: Pick<NewsSource, 'id' | 'isActive' | 'crawlIntervalMinutes' | 'maxItemsPerRun'> & { topicId?: string }) => demoMode ? Promise.resolve(source) : request<NewsSource>(`/api/v1/admin/news/sources/${source.id}`, { method: 'PATCH', body: JSON.stringify({ is_active: source.isActive, crawl_interval_minutes: source.crawlIntervalMinutes, max_items_per_run: source.maxItemsPerRun, topic_id: source.topicId ?? '' }) }),
+  crawlNewsSource: (id: string) => demoMode ? Promise.resolve({ job_id: `demo-${Date.now()}`, source_id: id }) : request<{ job_id: string; source_id: string }>(`/api/v1/admin/news/sources/${id}/crawl`, { method: 'POST' }),
+  crawlAllNewsSources: () => demoMode ? Promise.resolve({ queued: demoNewsSources.length }) : request<{ queued: number }>('/api/v1/admin/news/sources/crawl-all', { method: 'POST' }),
 };

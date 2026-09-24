@@ -6,6 +6,7 @@ import { ListNewsDto, NewsFeedbackDto, SaveNewsArticleDto, SaveNewsExpertDto, Sa
 
 const articleInclude = {
   topic: true,
+  source: true,
   expert: { include: { _count: { select: { followers: true, articles: true } } } },
   _count: { select: { likes: true } },
 } satisfies Prisma.NewsArticleInclude;
@@ -60,7 +61,7 @@ export class NewsService {
       this.prisma.newsArticle.count({ where }),
     ]);
     const likes = userId ? await this.likedIds(userId, rows.map((row) => row.id)) : new Set<string>();
-    return { data: rows.map((row) => this.articleView(row, likes.has(row.id))), extra: pageExtra(query.page, query.limit, total) };
+    return { data: rows.map((row) => this.articleView(row, likes.has(row.id), admin)), extra: pageExtra(query.page, query.limit, total) };
   }
 
   async article(idOrSlug: string, userId?: string) {
@@ -203,13 +204,20 @@ export class NewsService {
     return { name: dto.name.trim(), slug: dto.slug.trim().toLowerCase(), specialty: dto.specialty.trim(), bio: dto.bio.trim(), avatarUrl: dto.avatar_url, coverUrl: dto.cover_url, initials, isVerified: dto.is_verified, isActive: dto.is_active, sortOrder: dto.sort_order };
   }
 
-  private articleView(row: Prisma.NewsArticleGetPayload<{ include: typeof articleInclude }>, isLiked: boolean) {
+  private articleView(row: Prisma.NewsArticleGetPayload<{ include: typeof articleInclude }>, isLiked: boolean, admin = false) {
     return {
       id: row.id, title: row.title, slug: row.slug, summary: row.summary, content: row.content,
       image_url: row.imageUrl, video_url: row.videoUrl, source_url: row.sourceUrl, content_type: row.contentType,
       status: row.status, published_at: row.publishedAt, created_at: row.createdAt, updated_at: row.updatedAt,
       topic: row.topic, expert: row.expert ? this.expertView(row.expert, false) : null,
       like_count: row._count.likes, is_liked: isLiked,
+      ...(admin ? {
+        source: row.source ? { id: row.source.id, key: row.source.key, name: row.source.name, base_url: row.source.baseUrl } : null,
+        source_author: row.sourceAuthor,
+        source_content: row.sourceContent,
+        source_published_at: row.sourcePublishedAt,
+        source_fetched_at: row.sourceFetchedAt,
+      } : {}),
     };
   }
 

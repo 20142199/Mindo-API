@@ -50,6 +50,13 @@ export class SaveNewsExpertDto {
   @IsOptional() @IsInt() @Min(0) sort_order?: number;
 }
 
+export class UpdateNewsSourceDto {
+  @IsOptional() @IsBoolean() is_active?: boolean;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(15) @Max(1440) crawl_interval_minutes?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(30) max_items_per_run?: number;
+  @IsOptional() @IsString() topic_id?: string;
+}
+
 export class SetNewsInterestsDto {
   @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) topic_ids!: string[];
 }

@@ -1,9 +1,13 @@
+import { InjectQueue } from '@nestjs/bullmq';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Queue } from 'bullmq';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, JwtAuthGuard, Roles, authUser } from '../auth/auth.guard';
 import { ok } from '../common/api-response';
-import { ListNewsDto, NewsFeedbackDto, NewsSearchDto, SaveNewsArticleDto, SaveNewsExpertDto, SaveNewsTopicDto, SetNewsInterestsDto } from './news.dto';
+import { ListNewsDto, NewsFeedbackDto, NewsSearchDto, SaveNewsArticleDto, SaveNewsExpertDto, SaveNewsTopicDto, SetNewsInterestsDto, UpdateNewsSourceDto } from './news.dto';
+import { NEWS_CRAWL_QUEUE, NEWS_CRAWL_SOURCE_JOB } from './news-crawl.constants';
+import { NewsCrawlService } from './news-crawl.service';
 import { NewsService } from './news.service';
 import { OptionalJwtGuard } from './optional-jwt.guard';
 
@@ -64,7 +68,11 @@ export class NewsController {
 @Roles(UserRole.ADMIN)
 @Controller('api/v1/admin/news')
 export class AdminNewsController {
-  constructor(private readonly news: NewsService) {}
+  constructor(
+    private readonly news: NewsService,
+    private readonly crawler: NewsCrawlService,
+    @InjectQueue(NEWS_CRAWL_QUEUE) private readonly crawlQueue: Queue,
+  ) {}
 
   @Get('articles')
   async articles(@Query() query: ListNewsDto) {
@@ -95,4 +103,25 @@ export class AdminNewsController {
 
   @Patch('experts/:id')
   updateExpert(@Param('id') id: string, @Body() dto: SaveNewsExpertDto) { return this.news.updateExpert(id, dto).then((data) => ok(data, 'Đã cập nhật chuyên gia')); }
+
+  @Get('sources')
+  sources() { return this.crawler.listSources().then((data) => ok(data)); }
+
+  @Patch('sources/:id')
+  updateSource(@Param('id') id: string, @Body() dto: UpdateNewsSourceDto) { return this.crawler.updateSource(id, dto).then((data) => ok(data, 'Đã cập nhật nguồn tin')); }
+
+  @Post('sources/crawl-all')
+  async crawlAll() {
+    const sources = await this.crawler.listSources();
+    const active = sources.filter((source) => source.isActive);
+    await Promise.all(active.map((source) => this.crawlQueue.add(NEWS_CRAWL_SOURCE_JOB, { sourceId: source.id }, { jobId: `manual-${source.id}-${Date.now()}`, removeOnComplete: 50, removeOnFail: 100 })));
+    return ok({ queued: active.length }, `Đã xếp lịch crawl ${active.length} nguồn`);
+  }
+
+  @Post('sources/:id/crawl')
+  async crawlSource(@Param('id') id: string) {
+    await this.crawler.updateSource(id, {});
+    const job = await this.crawlQueue.add(NEWS_CRAWL_SOURCE_JOB, { sourceId: id }, { jobId: `manual-${id}-${Date.now()}`, removeOnComplete: 50, removeOnFail: 100 });
+    return ok({ job_id: job.id, source_id: id }, 'Đã xếp lịch crawl nguồn tin');
+  }
 }
