@@ -26,13 +26,20 @@ export class AiService {
     @InjectQueue('ai-response') private readonly queue: Queue,
   ) {}
 
-  experts(activeOnly = true, search?: string) {
+  async experts(activeOnly = true, search?: string) {
     const q = search?.trim();
     const where: Prisma.AiExpertWhereInput = {
       ...(activeOnly ? { isActive: true } : {}),
       ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' } }, { specialty: { contains: q, mode: 'insensitive' } }] } : {}),
     };
-    return this.prisma.aiExpert.findMany({ where, orderBy: [{ isActive: 'desc' }, { name: 'asc' }] });
+    const rows = await this.prisma.aiExpert.findMany({ where, orderBy: [{ isActive: 'desc' }, { name: 'asc' }] });
+    if (!activeOnly) return rows;
+    return rows.map(({ systemPrompt: _systemPrompt, ...expert }) => ({
+      ...expert,
+      initials: expert.name.split(/\s+/).filter(Boolean).slice(-2).map((part) => part[0]?.toLocaleUpperCase('vi')).join(''),
+      availability: 'ONLINE',
+      availability_label: 'Đang hoạt động',
+    }));
   }
 
   config() {
