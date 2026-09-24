@@ -8,6 +8,12 @@ export type NewsEditorialDraft = {
   summary: string;
   aiSummary: string;
   content: string;
+  model: string;
+  usage: {
+    inputTokens: number | null;
+    outputTokens: number | null;
+    totalTokens: number | null;
+  };
 };
 
 type ProviderEditorialDraft = {
@@ -99,7 +105,11 @@ export class NewsAiSummaryService {
       signal: AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS ?? 60_000)),
     });
     if (!response.ok) throw new ServiceUnavailableException(`Nhà cung cấp AI trả về HTTP ${response.status}`);
-    const data = await response.json() as { choices?: Array<{ message?: { content?: string; refusal?: string } }> };
+    const data = await response.json() as {
+      model?: string;
+      choices?: Array<{ message?: { content?: string; refusal?: string } }>;
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    };
     const message = data.choices?.[0]?.message;
     if (message?.refusal) throw new ServiceUnavailableException('Nhà cung cấp AI từ chối biên tập bài viết');
 
@@ -117,7 +127,18 @@ export class NewsAiSummaryService {
     if (title.length < 5 || !summary || aiSummary.split('\n').length < 4 || content.length < 100) {
       throw new ServiceUnavailableException('Nhà cung cấp AI trả về bản biên tập chưa đầy đủ');
     }
-    return { title, summary, aiSummary, content };
+    return {
+      title,
+      summary,
+      aiSummary,
+      content,
+      model: data.model ?? process.env.NEWS_AI_SUMMARY_MODEL ?? process.env.AI_CHAT_MODEL ?? 'gpt-4o-mini',
+      usage: {
+        inputTokens: data.usage?.prompt_tokens ?? null,
+        outputTokens: data.usage?.completion_tokens ?? null,
+        totalTokens: data.usage?.total_tokens ?? null,
+      },
+    };
   }
 
   private cleanText(value: unknown) {

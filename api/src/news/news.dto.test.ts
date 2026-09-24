@@ -3,7 +3,7 @@ import { NewsContentType, NewsFeedbackType } from '@prisma/client';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { describe, expect, it } from 'vitest';
-import { ListNewsDto, NewsFeedbackDto, SaveNewsArticleDto, SetNewsInterestsDto } from './news.dto';
+import { ListNewsDto, NewsFeedbackDto, RequestNewsEditorialDto, SaveNewsArticleDto, SetNewsInterestsDto } from './news.dto';
 
 describe('news DTOs', () => {
   it('transforms and validates article pagination', async () => {
@@ -28,5 +28,11 @@ describe('news DTOs', () => {
   it('limits the number of selected interests', async () => {
     const dto = plainToInstance(SetNewsInterestsDto, { topic_ids: Array.from({ length: 21 }, (_, index) => `topic-${index}`) });
     expect((await validate(dto)).some((error) => error.property === 'topic_ids')).toBe(true);
+  });
+
+  it('accepts an explicit force flag for AI re-editorial', async () => {
+    const dto = plainToInstance(RequestNewsEditorialDto, { force: true });
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.force).toBe(true);
   });
 });

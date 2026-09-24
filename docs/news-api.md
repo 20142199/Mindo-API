@@ -29,6 +29,7 @@ Tất cả yêu cầu access token của tài khoản `ADMIN`.
 |---|---|
 | GET/POST | `/api/v1/admin/news/articles` |
 | PATCH | `/api/v1/admin/news/articles/:id` |
+| POST | `/api/v1/admin/news/articles/:id/editorialize` |
 | GET/POST | `/api/v1/admin/news/topics` |
 | PATCH | `/api/v1/admin/news/topics/:id` |
 | GET/POST | `/api/v1/admin/news/experts` |
@@ -49,12 +50,16 @@ Crawler chạy nền mỗi 5 phút và chỉ xử lý nguồn đã đến chu k�
 - Chống trùng bằng hash URL chuẩn hóa theo từng nguồn.
 - Bài mới luôn được lưu ở trạng thái `DRAFT`.
 - Tiêu đề và toàn bộ thân bài gốc nằm trong `source_title` và `source_content`; chỉ API Admin trả về. API ứng dụng không trả các trường này.
-- Khi AI được cấu hình, một lần biên tập tạo đồng bộ tiêu đề tiếng Việt, mô tả ngắn, tổng hợp 4–5 dòng (`ai_summary`) và bài viết đầy đủ (`content`).
+- Crawler không tự gọi AI. Sau khi bài gốc xuất hiện trong Admin, quản trị viên chọn “Dịch & biên tập bằng AI” và xác nhận việc sử dụng API credit.
+- `POST /api/v1/admin/news/articles/:id/editorialize` nhận `{ "force": false }`. Gửi `force: true` khi Admin xác nhận biên tập lại và ghi đè bản tiếng Việt đã có.
+- Mỗi lần biên tập tạo đồng bộ tiêu đề tiếng Việt, mô tả ngắn, tổng hợp 4–5 dòng (`ai_summary`) và bài viết đầy đủ (`content`).
 - `content` là nội dung tiếng Việt hiển thị trên site sau khi Admin duyệt và xuất bản. Bản AI mới luôn ở trạng thái `DRAFT` và Admin có thể chỉnh sửa trước khi đăng.
 - AI được yêu cầu giữ nguyên dữ kiện, tên riêng, số liệu và mốc thời gian; không dịch từng câu, không sao chép cách diễn đạt, không thêm dữ kiện hoặc lời khuyên tài chính.
-- Nếu AI tạm lỗi hoặc chưa được cấu hình, bài gốc vẫn được lưu. Lần crawl sau sẽ thử bổ sung bản biên tập cho các bài còn thiếu và không bao giờ lưu nội dung mô phỏng.
-- Crawler không ghi đè `content` đã có, nhờ đó nội dung Admin đã chỉnh sửa được giữ nguyên; nếu chỉ thiếu `ai_summary`, hệ thống chỉ bổ sung trường này.
+- Trạng thái AI gồm `NOT_REQUESTED`, `PROCESSING`, `READY`, `FAILED`; API Admin trả thêm lỗi, model, thời điểm xử lý và số token input/output/total.
+- Queue chỉ xử lý một job cùng lúc để tránh gọi AI dồn dập. Yêu cầu trùng khi bài đang `PROCESSING` sẽ bị từ chối.
+- Nếu AI tạm lỗi hoặc tài khoản hết credit, bài gốc vẫn nguyên vẹn, trạng thái chuyển sang `FAILED` và Admin có thể thử lại sau.
+- Biên tập lại luôn cần xác nhận vì sẽ ghi đè tiêu đề, mô tả và nội dung tiếng Việt đã có, đồng thời phát sinh thêm token.
 
 Đặt `NEWS_CRAWL_ENABLED=false` nếu cần tạm dừng lịch tự động. Nút “Crawl ngay” vẫn xếp job thủ công vào Redis.
 
-Để bật biên tập AI trên production, đặt `AI_MOCK=false`, cấu hình `AI_API_KEY`, và có thể chọn model riêng bằng `NEWS_AI_SUMMARY_MODEL`. `NEWS_AI_EDITORIAL_MAX_TOKENS` điều chỉnh độ dài đầu ra, mặc định `3000`.
+Để bật biên tập AI trên production, đặt `AI_MOCK=false`, cấu hình `AI_API_KEY`, và có thể chọn model riêng bằng `NEWS_AI_SUMMARY_MODEL`. `NEWS_AI_EDITORIAL_MAX_TOKENS` điều chỉnh độ dài đầu ra, mặc định `3000`. Hệ thống chỉ dùng key sau thao tác xác nhận của Admin.

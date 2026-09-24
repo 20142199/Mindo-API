@@ -536,6 +536,15 @@ dd { color: var(--navy); font-size: 13px; font-weight: 500; }
 .ai-news-summary > header span { display: grid; gap: 2px; }
 .ai-news-summary > header small { color: var(--muted); font-size: 10px; }
 .ai-news-summary > div { padding: 15px; color: #30445d; font-size: 12px; line-height: 21px; white-space: pre-line; }
+.ai-editorial-control { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 15px; border: 1px solid #cbd8e6; border-radius: 14px; background: #f7f9fc; }
+.ai-editorial-control > span { display: grid; gap: 5px; min-width: 0; }
+.ai-editorial-control strong { display: inline-flex; align-items: center; gap: 7px; color: var(--navy); }
+.ai-editorial-control small { color: var(--muted); font-size: 10px; line-height: 16px; }
+.ai-editorial-control.ready { border-color: #c9d9aa; background: #f8fbf1; }
+.ai-editorial-control.failed { border-color: #f0caca; background: #fff8f8; }
+.ai-editorial-control.processing { border-color: #d9cfad; background: #fffbef; }
+.ai-editorial-control .ai-editorial-error { color: var(--danger); font-weight: 600; }
+.ai-editorial-control .primary-button { flex: 0 0 auto; }
 .source-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 0 20px 20px; }
 .source-card { display: grid; gap: 14px; padding: 17px; border: 1px solid var(--border-soft); border-radius: 15px; background: #fff; }
 .source-card > header { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 10px; }
@@ -565,6 +574,7 @@ dd { color: var(--navy); font-size: 13px; font-weight: 500; }
   .news-tabs button { flex: 1 0 max-content; }
   .news-editor { padding: 17px; }
   .news-editor-grid, .topic-grid, .source-grid, .news-metrics { grid-template-columns: 1fr; }
+  .ai-editorial-control { align-items: stretch; flex-direction: column; }
   .news-editor-grid .wide-field { grid-column: auto; }
   .topic-grid article { grid-template-columns: 42px minmax(0, 1fr) 36px; }
   .topic-grid article > .status { grid-column: 2; justify-self: start; }

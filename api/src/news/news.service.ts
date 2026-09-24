@@ -218,6 +218,13 @@ export class NewsService {
         source_content: row.sourceContent,
         source_published_at: row.sourcePublishedAt,
         source_fetched_at: row.sourceFetchedAt,
+        ai_editorial_status: row.aiEditorialStatus,
+        ai_editorial_error: row.aiEditorialError,
+        ai_editorial_model: row.aiEditorialModel,
+        ai_editorial_input_tokens: row.aiEditorialInputTokens,
+        ai_editorial_output_tokens: row.aiEditorialOutputTokens,
+        ai_editorial_total_tokens: row.aiEditorialTotalTokens,
+        ai_editorial_at: row.aiEditorialAt,
       } : {}),
     };
   }

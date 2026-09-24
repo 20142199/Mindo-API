@@ -67,6 +67,13 @@ enum NewsCrawlStatus {
   FAILED
 }
 
+enum NewsEditorialStatus {
+  NOT_REQUESTED
+  PROCESSING
+  READY
+  FAILED
+}
+
 enum AgencyStatus {
   PENDING
   APPROVED
@@ -655,34 +662,41 @@ model AiMessage {
 }
 
 model NewsArticle {
-  id                String                @id @default(cuid())
-  title             String
-  slug              String                @unique
-  summary           String
-  aiSummary         String?
-  content           String
-  imageUrl          String?
-  videoUrl          String?
-  sourceUrl         String?
-  contentType       NewsContentType       @default(ARTICLE)
-  status            ArticleStatus         @default(DRAFT)
-  topicId           String?
-  expertId          String?
-  sourceId          String?
-  externalKey       String?
-  sourceTitle       String?
-  sourceAuthor      String?
-  sourceContent     String?
-  sourcePublishedAt DateTime?
-  sourceFetchedAt   DateTime?
-  publishedAt       DateTime?
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
-  topic             NewsTopic?            @relation(fields: [topicId], references: [id], onDelete: SetNull)
-  expert            NewsExpert?           @relation(fields: [expertId], references: [id], onDelete: SetNull)
-  source            NewsSource?           @relation(fields: [sourceId], references: [id], onDelete: SetNull)
-  likes             NewsArticleLike[]
-  feedback          NewsArticleFeedback[]
+  id                      String                @id @default(cuid())
+  title                   String
+  slug                    String                @unique
+  summary                 String
+  aiSummary               String?
+  content                 String
+  imageUrl                String?
+  videoUrl                String?
+  sourceUrl               String?
+  contentType             NewsContentType       @default(ARTICLE)
+  status                  ArticleStatus         @default(DRAFT)
+  topicId                 String?
+  expertId                String?
+  sourceId                String?
+  externalKey             String?
+  sourceTitle             String?
+  sourceAuthor            String?
+  sourceContent           String?
+  sourcePublishedAt       DateTime?
+  sourceFetchedAt         DateTime?
+  aiEditorialStatus       NewsEditorialStatus   @default(NOT_REQUESTED)
+  aiEditorialError        String?
+  aiEditorialModel        String?
+  aiEditorialInputTokens  Int?
+  aiEditorialOutputTokens Int?
+  aiEditorialTotalTokens  Int?
+  aiEditorialAt           DateTime?
+  publishedAt             DateTime?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+  topic                   NewsTopic?            @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  expert                  NewsExpert?           @relation(fields: [expertId], references: [id], onDelete: SetNull)
+  source                  NewsSource?           @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  likes                   NewsArticleLike[]
+  feedback                NewsArticleFeedback[]
 
   @@unique([sourceId, externalKey])
   @@index([status, publishedAt])
@@ -690,6 +704,7 @@ model NewsArticle {
   @@index([expertId, status, publishedAt])
   @@index([contentType, status, publishedAt])
   @@index([sourceId, sourcePublishedAt])
+  @@index([aiEditorialStatus, createdAt])
 }
 
 model NewsSource {

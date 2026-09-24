@@ -22,7 +22,7 @@ describe('NewsAiSummaryService', () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ choices: [{ message: { content: JSON.stringify({
+      json: async () => ({ model: 'summary-model-2026', usage: { prompt_tokens: 120, completion_tokens: 80, total_tokens: 200 }, choices: [{ message: { content: JSON.stringify({
         title: 'Tiêu đề tiếng Việt',
         short_summary: 'Mô tả ngắn bằng tiếng Việt.',
         summary_lines: ['Dòng một.', 'Dòng hai.', 'Dòng ba.', 'Dòng bốn.'],
@@ -38,6 +38,8 @@ describe('NewsAiSummaryService', () => {
       summary: 'Mô tả ngắn bằng tiếng Việt.',
       aiSummary: 'Dòng một.\nDòng hai.\nDòng ba.\nDòng bốn.',
       content: editorialContent,
+      model: 'summary-model-2026',
+      usage: { inputTokens: 120, outputTokens: 80, totalTokens: 200 },
     });
     const request = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
       model: string;

@@ -5,8 +5,8 @@ import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { AuthenticatedRequest, JwtAuthGuard, Roles, authUser } from '../auth/auth.guard';
 import { ok } from '../common/api-response';
-import { ListNewsDto, NewsFeedbackDto, NewsSearchDto, SaveNewsArticleDto, SaveNewsExpertDto, SaveNewsTopicDto, SetNewsInterestsDto, UpdateNewsSourceDto } from './news.dto';
-import { NEWS_CRAWL_QUEUE, NEWS_CRAWL_SOURCE_JOB } from './news-crawl.constants';
+import { ListNewsDto, NewsFeedbackDto, NewsSearchDto, RequestNewsEditorialDto, SaveNewsArticleDto, SaveNewsExpertDto, SaveNewsTopicDto, SetNewsInterestsDto, UpdateNewsSourceDto } from './news.dto';
+import { NEWS_CRAWL_QUEUE, NEWS_CRAWL_SOURCE_JOB, NEWS_EDITORIAL_ARTICLE_JOB } from './news-crawl.constants';
 import { NewsCrawlService } from './news-crawl.service';
 import { NewsService } from './news.service';
 import { OptionalJwtGuard } from './optional-jwt.guard';
@@ -85,6 +85,22 @@ export class AdminNewsController {
 
   @Patch('articles/:id')
   updateArticle(@Param('id') id: string, @Body() dto: SaveNewsArticleDto) { return this.news.updateArticle(id, dto).then((data) => ok(data, 'Đã cập nhật nội dung')); }
+
+  @Post('articles/:id/editorialize')
+  async editorializeArticle(@Param('id') id: string, @Body() dto: RequestNewsEditorialDto) {
+    await this.crawler.prepareEditorial(id, dto.force ?? false);
+    try {
+      const job = await this.crawlQueue.add(NEWS_EDITORIAL_ARTICLE_JOB, { articleId: id }, {
+        jobId: `editorial-${id}-${Date.now()}`,
+        removeOnComplete: 50,
+        removeOnFail: 100,
+      });
+      return ok({ job_id: job.id, article_id: id, status: 'PROCESSING' }, 'Đã xếp lịch biên tập bằng AI');
+    } catch (error) {
+      await this.crawler.failEditorialQueue(id, error);
+      throw error;
+    }
+  }
 
   @Get('topics')
   topics() { return this.news.topics(true).then((data) => ok(data)); }

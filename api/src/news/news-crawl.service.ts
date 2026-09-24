@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { ArticleStatus, NewsContentType, NewsCrawlStatus } from '@prisma/client';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { ArticleStatus, NewsContentType, NewsCrawlStatus, NewsEditorialStatus } from '@prisma/client';
 import { PrismaService } from '../common/prisma.module';
 import { parseArticleHtml, parseListingHtml } from './html-news.parser';
 import { NewsAiSummaryService } from './news-ai-summary.service';
@@ -66,7 +66,7 @@ export class NewsCrawlService {
       const keyed = candidates.map((candidate) => ({ ...candidate, externalKey: this.externalKey(candidate.url) }));
       const existing = keyed.length ? await this.prisma.newsArticle.findMany({
         where: { sourceId: id, externalKey: { in: keyed.map((row) => row.externalKey) } },
-        select: { id: true, externalKey: true, title: true, sourceContent: true, aiSummary: true, content: true },
+        select: { externalKey: true },
       }) : [];
       const existingKeys = new Set(existing.map((row) => row.externalKey));
       const fresh = keyed.filter((row) => !existingKeys.has(row.externalKey)).slice(0, source.maxItemsPerRun);
@@ -79,7 +79,7 @@ export class NewsCrawlService {
           await this.assertRobotsAllowed(candidate.url);
           const html = await this.fetchHtml(candidate.url, definition.allowedHosts);
           const article = parseArticleHtml(html, candidate.url, definition);
-          const created = await this.prisma.newsArticle.create({
+          await this.prisma.newsArticle.create({
             data: {
               title: article.title,
               slug: this.articleSlug(article.title, candidate.externalKey),
@@ -100,34 +100,10 @@ export class NewsCrawlService {
             },
           });
           imported += 1;
-          if (this.aiSummary.isConfigured()) {
-            try {
-              await this.editorializeArticle(created.id, article.title, article.content, candidate.externalKey, true);
-            } catch (error) {
-              failed += 1;
-              errors.push(`${candidate.url} [AI]: ${this.errorMessage(error)}`);
-            }
-          }
         } catch (error) {
           failed += 1;
           errors.push(`${candidate.url}: ${this.errorMessage(error)}`);
         }
-      }
-
-      const missingEditorials = existing.filter((row) => (!row.aiSummary || !row.content.trim()) && row.sourceContent);
-      if (this.aiSummary.isConfigured()) {
-        const retryLimit = Math.max(2, source.maxItemsPerRun - fresh.length);
-        for (const article of missingEditorials.slice(0, retryLimit)) {
-          try {
-            await this.editorializeArticle(article.id, article.title, article.sourceContent!, article.externalKey ?? this.externalKey(article.id), !article.content.trim());
-          } catch (error) {
-            failed += 1;
-            errors.push(`${article.title} [AI]: ${this.errorMessage(error)}`);
-          }
-        }
-      } else if (fresh.length || missingEditorials.length) {
-        failed += 1;
-        errors.push(`AI: ${this.aiSummary.configurationError()}`);
       }
 
       const skipped = candidates.length - fresh.length;
@@ -145,6 +121,68 @@ export class NewsCrawlService {
         this.prisma.newsCrawlRun.update({ where: { id: run.id }, data: { status: NewsCrawlStatus.FAILED, failed: 1, errorMessage: message, completedAt } }),
         this.prisma.newsSource.update({ where: { id }, data: { lastCrawledAt: completedAt, lastError: message } }),
       ]);
+      throw error;
+    }
+  }
+
+  async prepareEditorial(id: string, force = false) {
+    const article = await this.prisma.newsArticle.findUnique({
+      where: { id },
+      select: { id: true, sourceContent: true, aiEditorialStatus: true },
+    });
+    if (!article) throw new NotFoundException('Bài viết không tồn tại');
+    if (!article.sourceContent?.trim()) throw new BadRequestException('Bài viết chưa có nội dung gốc để AI biên tập');
+    if (!this.aiSummary.isConfigured()) throw new ServiceUnavailableException(this.aiSummary.configurationError());
+    if (article.aiEditorialStatus === NewsEditorialStatus.PROCESSING) throw new ConflictException('Bài viết đang được AI xử lý');
+    if (article.aiEditorialStatus === NewsEditorialStatus.READY && !force) {
+      throw new BadRequestException('Bản tiếng Việt đã tồn tại; cần xác nhận biên tập lại');
+    }
+    const claimed = await this.prisma.newsArticle.updateMany({
+      where: { id, aiEditorialStatus: { not: NewsEditorialStatus.PROCESSING } },
+      data: { aiEditorialStatus: NewsEditorialStatus.PROCESSING, aiEditorialError: null },
+    });
+    if (!claimed.count) throw new ConflictException('Bài viết đang được AI xử lý');
+    return { article_id: id, status: NewsEditorialStatus.PROCESSING };
+  }
+
+  async failEditorialQueue(id: string, error: unknown) {
+    await this.prisma.newsArticle.updateMany({
+      where: { id, aiEditorialStatus: NewsEditorialStatus.PROCESSING },
+      data: { aiEditorialStatus: NewsEditorialStatus.FAILED, aiEditorialError: this.errorMessage(error) },
+    });
+  }
+
+  async editorializeArticleById(id: string) {
+    const article = await this.prisma.newsArticle.findUnique({
+      where: { id },
+      select: { id: true, sourceTitle: true, sourceContent: true, externalKey: true },
+    });
+    if (!article) throw new NotFoundException('Bài viết không tồn tại');
+    if (!article.sourceContent?.trim()) throw new BadRequestException('Bài viết chưa có nội dung gốc để AI biên tập');
+    try {
+      const draft = await this.aiSummary.createEditorialDraft(article.sourceTitle ?? 'Bài viết nguồn', article.sourceContent);
+      return await this.prisma.newsArticle.update({
+        where: { id },
+        data: {
+          title: draft.title,
+          slug: this.articleSlug(draft.title, article.externalKey ?? this.externalKey(article.id)),
+          summary: draft.summary,
+          aiSummary: draft.aiSummary,
+          content: draft.content,
+          aiEditorialStatus: NewsEditorialStatus.READY,
+          aiEditorialError: null,
+          aiEditorialModel: draft.model,
+          aiEditorialInputTokens: draft.usage.inputTokens,
+          aiEditorialOutputTokens: draft.usage.outputTokens,
+          aiEditorialTotalTokens: draft.usage.totalTokens,
+          aiEditorialAt: new Date(),
+        },
+      });
+    } catch (error) {
+      await this.prisma.newsArticle.updateMany({
+        where: { id },
+        data: { aiEditorialStatus: NewsEditorialStatus.FAILED, aiEditorialError: this.errorMessage(error) },
+      });
       throw error;
     }
   }
@@ -170,20 +208,6 @@ export class NewsCrawlService {
   private articleSlug(title: string, externalKey: string) {
     const value = title.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '').slice(0, 90);
     return `${value || 'tin-tuc'}-${externalKey.slice(0, 10)}`;
-  }
-
-  private async editorializeArticle(id: string, sourceTitle: string, sourceContent: string, externalKey: string, replaceArticle: boolean) {
-    const draft = await this.aiSummary.createEditorialDraft(sourceTitle, sourceContent);
-    await this.prisma.newsArticle.update({
-      where: { id },
-      data: replaceArticle ? {
-        title: draft.title,
-        slug: this.articleSlug(draft.title, externalKey),
-        summary: draft.summary,
-        aiSummary: draft.aiSummary,
-        content: draft.content,
-      } : { aiSummary: draft.aiSummary },
-    });
   }
 
   private async fetchHtml(url: string, allowedHosts: string[]) {

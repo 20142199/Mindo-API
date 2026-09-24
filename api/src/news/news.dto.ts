@@ -57,6 +57,10 @@ export class UpdateNewsSourceDto {
   @IsOptional() @IsString() topic_id?: string;
 }
 
+export class RequestNewsEditorialDto {
+  @IsOptional() @IsBoolean() force?: boolean;
+}
+
 export class SetNewsInterestsDto {
   @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) topic_ids!: string[];
 }
