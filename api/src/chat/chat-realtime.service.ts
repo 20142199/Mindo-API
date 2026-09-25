@@ -64,7 +64,7 @@ export class ChatRealtimeService implements OnModuleDestroy {
   }
 
   async publishNewMessage(conversationId: string, message: Record<string, unknown>) {
-    this.namespace?.to(this.channelRoom(conversationId)).emit('message:new', { message });
+    this.emitMessage('message:new', conversationId, message);
     await this.publishConversation(conversationId);
     void this.pushNewMessage(conversationId, message).catch((error) => {
       this.logger.warn(`Không gửi được push cho tin nhắn: ${error instanceof Error ? error.message : String(error)}`);
@@ -81,11 +81,35 @@ export class ChatRealtimeService implements OnModuleDestroy {
    *     thành viên.
    */
   publishSystemMessage(conversationId: string, message: Record<string, unknown>) {
-    this.namespace?.to(this.channelRoom(conversationId)).emit('message:new', { message });
+    this.emitMessage('message:new', conversationId, message);
+  }
+
+  /**
+   * Bắn một tin vào phòng hội thoại, GỠ `is_own` ra trước.
+   *
+   * `is_own` là một khẳng định TƯƠNG ĐỐI với người hỏi: nó trả lời câu "tin
+   * này có phải của bạn không". Trên phản hồi REST thì đúng, vì có đúng một
+   * người hỏi. Trên một bản tin phát sóng thì KHÔNG CÓ "bạn" nào cả — payload
+   * được dựng theo góc nhìn người GỬI, nên gửi nguyên si là mọi người trong
+   * phòng đều nhận `is_own: true`, và tin của người khác hiện ra bên phải màn
+   * hình như thể chính họ vừa gõ.
+   *
+   * Không dựng lại payload cho từng người như `publishConversation`: nội dung
+   * tin giống hệt nhau với mọi người, chỉ mỗi trường này là tương đối. Gỡ nó
+   * ra rẻ hơn nhiều lần đọc CSDL, và buộc client tự so `sender.user_id` —
+   * việc mà chỉ client mới làm đúng được.
+   */
+  private emitMessage(
+    event: 'message:new' | 'message:updated',
+    conversationId: string,
+    message: Record<string, unknown>,
+  ) {
+    const { is_own: _ignored, ...shared } = message;
+    this.namespace?.to(this.channelRoom(conversationId)).emit(event, { message: shared });
   }
 
   publishMessageUpdated(conversationId: string, message: Record<string, unknown>) {
-    this.namespace?.to(this.channelRoom(conversationId)).emit('message:updated', { message });
+    this.emitMessage('message:updated', conversationId, message);
     void this.publishConversation(conversationId);
   }
 

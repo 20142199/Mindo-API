@@ -28,6 +28,8 @@ Server phát:
 
 Tin hệ thống (tạo nhóm, thêm/xóa thành viên) cũng được phát qua `message:new` như mọi tin khác, `sender` là `null`. Nó không sinh push notification.
 
+**`message:new` và `message:updated` KHÔNG kèm `is_own`.** Trường đó trả lời câu "tin này có phải của bạn không", nên nó chỉ có nghĩa trên phản hồi REST — nơi có đúng một người hỏi. Một bản tin phát sóng thì không có "bạn" nào cả. Client tự so `message.sender.user_id` với user id của chính mình; đó cũng là cách duy nhất đúng, vì chỉ client mới biết nó đang đăng nhập bằng tài khoản nào.
+
 **Mọi enum trên phản hồi trả đúng dạng đã khai, tức CHỮ HOA** — `message_type`, `type` của hội thoại, `role` của thành viên. Trùng với dạng mà request phải gửi lên, nên client đọc gì ghi lại được nấy.
 
 ## REST
