@@ -12,6 +12,7 @@ import { Queue } from 'bullmq';
 import { randomUUID } from 'node:crypto';
 import { pageExtra } from '../common/api-response';
 import { PrismaService } from '../common/prisma.module';
+import { PushNotificationService } from '../notification/push-notification.service';
 import { FileStorageService } from '../phase1/file-storage.service';
 import { AgoraService } from './agora.service';
 import { CALL_TIMEOUT_QUEUE } from './call.constants';
@@ -35,6 +36,7 @@ export class CallService {
     private readonly agora: AgoraService,
     private readonly signaling: CallSignalingService,
     private readonly files: FileStorageService,
+    private readonly push: PushNotificationService,
     @InjectQueue(CALL_TIMEOUT_QUEUE) private readonly timeoutQueue: Queue<{ callId: string }>,
   ) {}
 
@@ -95,6 +97,15 @@ export class CallService {
     const view = await this.view(row, callerId);
     const signal = this.signalPayload(row, 'call.invite');
     void this.signaling.publish({ toUserId: row.calleeId, fromUserId: row.callerId, kind: 'call.invite', payload: signal });
+    void this.push.notifyIncomingCall(row.calleeId, {
+      callId: row.id,
+      callerUserId: row.callerId,
+      callerName: row.caller.nickname ?? row.caller.fullName,
+      callType: row.callType,
+      conversationId: row.conversationId,
+    }).catch((error) => {
+      this.logger.warn(`Không gửi được push cuộc gọi ${row.id}: ${error instanceof Error ? error.message : String(error)}`);
+    });
     return {
       call: view,
       media,

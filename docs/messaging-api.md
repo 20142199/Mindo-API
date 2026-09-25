@@ -73,3 +73,18 @@ Body gửi tin qua REST:
 - `DELETE /groups/:conversationId`: chỉ chủ nhóm được xóa toàn bộ nhóm.
 
 Chat cá nhân và thành viên nhóm chỉ nhận các tài khoản đã là bạn bè. Tệp đính kèm phải được upload bằng tài khoản gửi; URL tải file là URL ký có thời hạn và được làm mới khi đọc lịch sử.
+
+## Firebase push notification
+
+Socket.IO xử lý realtime khi app đang mở. Firebase Cloud Messaging đánh thức/thông báo cho thiết bị khi app chạy nền hoặc đã đóng.
+
+- Khi đăng nhập, app nên gửi `fcm_token` cùng body login.
+- Mỗi khi Firebase làm mới token, gọi `PUT /api/v1/investor/devices/push-token` với body `{ "fcm_token": "..." }`.
+- Khi người dùng tắt thông báo hoặc đăng xuất thiết bị, gọi `DELETE /api/v1/investor/devices/push-token` trước khi xóa token tại app.
+- Một tài khoản có thể đăng nhập và nhận thông báo trên nhiều thiết bị.
+- Hội thoại đã mute và tài khoản tắt `in_app_notifications` sẽ không nhận push tin nhắn.
+- Token Firebase hết hạn/không còn đăng ký được API tự loại bỏ.
+
+Payload tin nhắn có `data.type=chat_message`, `conversation_id`, `message_id`, `sender_user_id`, `message_type`. Payload cuộc gọi đến có `data.type=incoming_call`, `call_id`, `caller_user_id`, `caller_name`, `call_type`, `conversation_id`.
+
+Android cần tạo notification channel `mindo_messages` và `mindo_calls`. iOS cần bật Push Notifications và Background Modes > Remote notifications; cuộc gọi VoIP native khi app bị hệ điều hành tắt hoàn toàn vẫn nên bổ sung APNs PushKit/CallKit ở phía iOS.

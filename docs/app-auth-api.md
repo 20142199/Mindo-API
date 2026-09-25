@@ -73,6 +73,18 @@ On success, show the registration-success screen and direct the user to log in. 
 }
 ```
 
+`fcm_token` được lưu theo từng phiên/thiết bị. Khi Firebase cấp token mới sau lúc đăng nhập, app cập nhật bằng:
+
+```http
+PUT /api/v1/investor/devices/push-token
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{"fcm_token":"<firebase-registration-token>"}
+```
+
+Trước khi xóa token trên thiết bị hoặc khi người dùng tắt push, gọi `DELETE /api/v1/investor/devices/push-token` với cùng Bearer token.
+
 The response returns `user`, `access_token`, and `refresh_token`. `remember_me` is accepted to match the app form; whether credentials remain on the device is controlled by the app's secure storage. An unverified account receives HTTP 403.
 
 Use `Authorization: Bearer <access_token>` for protected requests. Rotate tokens with `POST /refresh-token`:

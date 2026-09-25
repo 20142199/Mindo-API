@@ -26,6 +26,8 @@ cp deploy/.env.production.example deploy/.env.production
 
 Thay toàn bộ password/secret mẫu. `POSTGRES_PASSWORD` nếu có ký tự đặc biệt phải được URL-encode tương ứng trong `DATABASE_URL`.
 
+Để bật Firebase push, vào Firebase Console > Project settings > Service accounts, tạo service-account JSON rồi base64 toàn bộ file và đặt vào `FIREBASE_SERVICE_ACCOUNT_BASE64`. Không commit file JSON hoặc private key vào repository. Có thể dùng bộ ba `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` thay thế.
+
 Các URL domain đã được cố định trong compose:
 
 - `APP_URL=https://api-mindo.stg-studio.com`

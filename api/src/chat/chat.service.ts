@@ -427,6 +427,35 @@ export class ChatService {
     return rows.map((row) => row.userId);
   }
 
+  async getPushContext(conversationId: string, senderUserId: string) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, deletedAt: null },
+      select: {
+        type: true,
+        title: true,
+        members: {
+          where: { leftAt: null },
+          select: {
+            userId: true,
+            isMuted: true,
+            user: { select: { fullName: true, nickname: true } },
+          },
+        },
+      },
+    });
+    if (!conversation) return null;
+    const sender = conversation.members.find((member) => member.userId === senderUserId);
+    if (!sender) return null;
+    const senderName = sender.user.nickname ?? sender.user.fullName;
+    return {
+      senderName,
+      conversationTitle: conversation.type === ConversationType.GROUP ? conversation.title : senderName,
+      recipientUserIds: conversation.members
+        .filter((member) => member.userId !== senderUserId && !member.isMuted)
+        .map((member) => member.userId),
+    };
+  }
+
   async getConversationItemForUser(userId: string, conversationId: string) {
     return this.getConversation(userId, conversationId);
   }

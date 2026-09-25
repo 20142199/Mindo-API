@@ -143,7 +143,7 @@ Các sự kiện:
 
 ## Lưu ý mobile
 
-API hiện hỗ trợ cuộc gọi khi app đang hoạt động, tín hiệu RTM và khôi phục trạng thái khi app mở lại. Để điện thoại đổ chuông ổn định khi app đã bị hệ điều hành tắt hoàn toàn, phase mobile cần thêm FCM/APNs; iOS nên kết hợp PushKit/CallKit. Đây là lớp đánh thức ứng dụng, không thay đổi hợp đồng RTC và lịch sử ở trên.
+API gửi FCM priority cao với `data.type=incoming_call` khi bắt đầu cuộc gọi, song song với Agora RTM. Android dùng notification channel `mindo_calls`. Trên iOS, FCM hiển thị thông báo cuộc gọi; để có trải nghiệm VoIP native và đánh thức ổn định khi app bị hệ điều hành tắt hoàn toàn, app vẫn nên kết hợp APNs PushKit/CallKit. Đây là lớp đánh thức ứng dụng, không thay đổi hợp đồng RTC và lịch sử ở trên.
 
 ## Kiểm thử cục bộ
 

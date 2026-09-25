@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { Equals, IsBoolean, IsEmail, IsIn, IsOptional, IsString, Length, Matches, MinLength } from 'class-validator';
+import { Equals, IsBoolean, IsEmail, IsIn, IsOptional, IsString, Length, Matches, MaxLength, MinLength } from 'class-validator';
 
 const normalizeEmail = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim().toLowerCase() : value;
@@ -17,7 +17,7 @@ const trimText = ({ value }: { value: unknown }) =>
 class AuthBaseDto {
   @Transform(normalizeEmail) @IsEmail() email!: string;
   @IsOptional() @IsBoolean() remember_me?: boolean;
-  @IsOptional() @IsString() fcm_token?: string;
+  @IsOptional() @IsString() @MaxLength(4096) fcm_token?: string;
   @IsOptional() @IsString() device_info?: string;
   @IsOptional() @IsIn(['mobile', 'desktop', 'tablet', 'unknown']) device_type?: string;
   @IsOptional() @IsString() device_location?: string;
@@ -73,4 +73,8 @@ export class ChangePasswordDto {
 export class RefreshDto {
   @IsString() refresh_token!: string;
   @IsOptional() @IsString() access_token?: string;
+}
+
+export class UpdatePushTokenDto {
+  @IsString() @MinLength(20) @MaxLength(4096) fcm_token!: string;
 }

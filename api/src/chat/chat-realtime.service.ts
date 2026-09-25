@@ -6,6 +6,7 @@ import Redis from 'ioredis';
 import type { Server as HttpServer } from 'node:http';
 import { Namespace, Server, Socket } from 'socket.io';
 import { PrismaService } from '../common/prisma.module';
+import { PushNotificationService } from '../notification/push-notification.service';
 import { parseSocketMessage } from './chat.domain';
 import { ChatPresenceService } from './chat-presence.service';
 import { ChatService } from './chat.service';
@@ -25,6 +26,7 @@ export class ChatRealtimeService implements OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly chat: ChatService,
     private readonly presence: ChatPresenceService,
+    private readonly push: PushNotificationService,
   ) {}
 
   async initialize(httpServer: HttpServer, origins: string[]) {
@@ -64,6 +66,9 @@ export class ChatRealtimeService implements OnModuleDestroy {
   async publishNewMessage(conversationId: string, message: Record<string, unknown>) {
     this.namespace?.to(this.channelRoom(conversationId)).emit('message:new', { message });
     await this.publishConversation(conversationId);
+    void this.pushNewMessage(conversationId, message).catch((error) => {
+      this.logger.warn(`Không gửi được push cho tin nhắn: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
 
   publishMessageUpdated(conversationId: string, message: Record<string, unknown>) {
@@ -216,6 +221,26 @@ export class ChatRealtimeService implements OnModuleDestroy {
       sub.disconnect();
       this.logger.warn(`Không bật được Redis adapter, Socket.IO chạy một node: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  private async pushNewMessage(conversationId: string, message: Record<string, unknown>) {
+    const sender = message.sender && typeof message.sender === 'object'
+      ? message.sender as Record<string, unknown>
+      : undefined;
+    const senderUserId = typeof sender?.user_id === 'string' ? sender.user_id : '';
+    const messageId = typeof message.message_id === 'string' ? message.message_id : '';
+    if (!senderUserId || !messageId) return;
+    const context = await this.chat.getPushContext(conversationId, senderUserId);
+    if (!context?.recipientUserIds.length) return;
+    await this.push.notifyChatMessage(context.recipientUserIds, {
+      conversationId,
+      messageId,
+      senderUserId,
+      senderName: context.senderName,
+      conversationTitle: context.conversationTitle,
+      messageType: typeof message.message_type === 'string' ? message.message_type : 'text',
+      content: typeof message.content === 'string' ? message.content : null,
+    });
   }
 
   private async handle(
