@@ -7,15 +7,24 @@ import { PrismaService } from '../common/prisma.module';
 
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
 
+export const CHAT_ALLOWED_MIME_TYPES = new Set([
+  ...ALLOWED_MIME_TYPES,
+  'text/plain',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+]);
+
 @Injectable()
 export class FileStorageService {
   private readonly baseDir = path.resolve(process.env.FILE_STORAGE_DIR ?? './storage/kyc');
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async save(ownerId: string, file?: Express.Multer.File) {
+  async save(ownerId: string, file?: Express.Multer.File, allowedMimeTypes: ReadonlySet<string> = ALLOWED_MIME_TYPES) {
     if (!file) throw new BadRequestException('Vui lòng chọn file cần tải lên');
-    if (!ALLOWED_MIME_TYPES.has(file.mimetype)) throw new BadRequestException('Chỉ hỗ trợ JPG, PNG, WebP hoặc PDF');
+    if (!allowedMimeTypes.has(file.mimetype)) throw new BadRequestException('Định dạng file không được hỗ trợ');
     if (file.size > 10 * 1024 * 1024) throw new BadRequestException('File không được vượt quá 10 MB');
 
     const extension = path.extname(file.originalname).toLowerCase().replace(/[^a-z0-9.]/g, '').slice(0, 10);

@@ -137,6 +137,24 @@ enum CallStatus {
   FAILED
 }
 
+enum ConversationType {
+  DIRECT
+  GROUP
+}
+
+enum ConversationMemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ChatMessageType {
+  TEXT
+  IMAGE
+  FILE
+  SYSTEM
+}
+
 model User {
   id                           String                 @id @default(cuid())
   email                        String                 @unique
@@ -201,6 +219,10 @@ model User {
   newsInterests                NewsUserInterest[]
   likedNewsArticles            NewsArticleLike[]
   newsFeedback                 NewsArticleFeedback[]
+  chatMemberships              ConversationMember[]
+  createdConversations         Conversation[]         @relation("ConversationCreator")
+  sentChatMessages             ChatMessage[]
+  savedChatMessages            SavedChatMessage[]
 }
 
 model FriendRequest {
@@ -224,6 +246,79 @@ model Friendship {
 
   @@id([userId, friendUserId])
   @@index([friendUserId])
+  @@index([userId, createdAt])
+}
+
+model Conversation {
+  id            String               @id @default(cuid())
+  type          ConversationType
+  directKey     String?              @unique
+  title         String?
+  avatarFileId  String?
+  createdById   String
+  lastMessageAt DateTime             @default(now())
+  deletedAt     DateTime?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  createdBy     User                 @relation("ConversationCreator", fields: [createdById], references: [id])
+  members       ConversationMember[]
+  messages      ChatMessage[]
+
+  @@index([lastMessageAt])
+  @@index([createdById, createdAt])
+}
+
+model ConversationMember {
+  conversationId    String
+  userId            String
+  role              ConversationMemberRole @default(MEMBER)
+  isMuted           Boolean                @default(false)
+  isHidden          Boolean                @default(false)
+  lastReadMessageId String?
+  lastReadAt        DateTime?
+  joinedAt          DateTime               @default(now())
+  leftAt            DateTime?
+  conversation      Conversation           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user              User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@index([userId, isHidden, leftAt])
+}
+
+model ChatMessage {
+  id                    String             @id @default(cuid())
+  conversationId        String
+  senderId              String?
+  type                  ChatMessageType    @default(TEXT)
+  content               String?
+  attachments           Json?
+  clientMessageId       String?
+  replyToId             String?
+  quotedMessageSnapshot Json?
+  editedAt              DateTime?
+  deletedAt             DateTime?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  conversation          Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender                User?              @relation(fields: [senderId], references: [id], onDelete: SetNull)
+  replyTo               ChatMessage?       @relation("ChatMessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies               ChatMessage[]      @relation("ChatMessageReplies")
+  savedBy               SavedChatMessage[]
+
+  @@unique([conversationId, clientMessageId])
+  @@index([conversationId, createdAt, id])
+  @@index([senderId, createdAt])
+  @@index([replyToId])
+}
+
+model SavedChatMessage {
+  userId    String
+  messageId String
+  createdAt DateTime    @default(now())
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@id([userId, messageId])
   @@index([userId, createdAt])
 }
 

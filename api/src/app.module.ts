@@ -7,6 +7,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { AccountModule } from './account/account.module';
 import { AuthModule } from './auth/auth.module';
 import { CallModule } from './call/call.module';
+import { ChatModule } from './chat/chat.module';
 import { PrismaModule } from './common/prisma.module';
 import { FriendModule } from './friend/friend.module';
 import { HistoryModule } from './history/history.module';
@@ -29,6 +30,7 @@ import { HealthController } from './health.controller';
     PrismaModule,
     AuthModule,
     CallModule,
+    ChatModule,
     FriendModule,
     Phase1Module,
     AccountModule,

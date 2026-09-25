@@ -5,6 +5,7 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { ChatRealtimeService } from './chat/chat-realtime.service';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -44,11 +45,13 @@ async function bootstrap() {
 
   const swagger = new DocumentBuilder()
     .setTitle('Mindo Phase 1 API')
-    .setDescription('Auth, KYC, VND deposits, NFT purchase, transaction history, personalized news and expert profiles')
+    .setDescription('Auth, KYC, VND deposits, internal NFT, referrals, news, AI, friends, realtime messaging and calls')
     .setVersion('0.1.0')
     .addBearerAuth()
     .build();
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swagger));
+
+  await app.get(ChatRealtimeService).initialize(app.getHttpServer(), origins);
 
   app.enableShutdownHooks();
   await app.listen(Number(process.env.PORT ?? 4000), '0.0.0.0');
