@@ -70,6 +70,24 @@ Body gửi tin qua REST:
 
 `message_type` nhận `TEXT`, `IMAGE`, `FILE`; `SYSTEM` chỉ server được tạo. Phản hồi trả lại đúng dạng chữ hoa này.
 
+Gửi kèm `reply_to_message_id` thì mọi phản hồi sau đó mang thêm `quoted_message` — một ảnh chụp tin gốc, chốt lại ngay lúc gửi nên không đổi theo nếu tin gốc bị sửa hay thu hồi về sau:
+
+```json
+{
+  "reply_to_message_id": "cmuh5ubya0003p6ubofqcxmi2",
+  "quoted_message": {
+    "kind": "REPLY",
+    "source_message_id": "cmuh5ubya0003p6ubofqcxmi2",
+    "source_sender_name": "Nguyen Hong Son Nickname",
+    "source_message_type": "TEXT",
+    "content_preview": "Chào B, tin thật đầu tiên",
+    "attachment_file_id": "…"
+  }
+}
+```
+
+Tên trường bên trong có tiền tố `source_`, KHÔNG phải `message_id`/`sender_name`/`preview`. `attachment_file_id` chỉ xuất hiện khi tin gốc có tệp đính kèm, `content_preview` cắt ở 200 ký tự. Đoán tên khác đi thì client không văng lỗi — nó dựng ra một khối trích dẫn rỗng, đúng một vạch màu không chữ, và chỉ lộ ra khi tải lại màn.
+
 `POST /conversations/groups`, `POST /groups/:id/members` và `DELETE /groups/:id/members/:userId` trả thêm `system_message` — chính tin vừa được phát qua `message:new`.
 
 ### Nhóm
