@@ -71,6 +71,19 @@ export class ChatRealtimeService implements OnModuleDestroy {
     });
   }
 
+  /**
+   * Bắn tin hệ thống vào phòng hội thoại.
+   *
+   * Tách khỏi `publishNewMessage` vì hai chỗ khác nhau ở hai điểm:
+   *   - không gửi push: "… đã thêm 3 thành viên" không đáng làm rung máy;
+   *   - không gọi `publishConversation`: ba đường sinh ra tin hệ thống đều
+   *     đã gọi nó ngay trước đó rồi, gọi lại là fan-out hai lần cho mỗi
+   *     thành viên.
+   */
+  publishSystemMessage(conversationId: string, message: Record<string, unknown>) {
+    this.namespace?.to(this.channelRoom(conversationId)).emit('message:new', { message });
+  }
+
   publishMessageUpdated(conversationId: string, message: Record<string, unknown>) {
     this.namespace?.to(this.channelRoom(conversationId)).emit('message:updated', { message });
     void this.publishConversation(conversationId);
@@ -147,7 +160,7 @@ export class ChatRealtimeService implements OnModuleDestroy {
           content: dto.content,
           attachments: dto.attachments?.map((item) => ({ file_id: item.fileId })),
           client_message_id: dto.clientMessageId,
-          reply_to_message_id: dto.parentMessageId,
+          reply_to_message_id: dto.replyToMessageId,
         });
         if (!result.duplicate) await this.publishNewMessage(dto.channelId, result.message);
         return {

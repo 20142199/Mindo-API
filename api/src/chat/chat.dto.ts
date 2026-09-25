@@ -84,5 +84,5 @@ export type SocketMessageSendDto = {
   content?: string;
   attachments?: Array<{ fileId: string }>;
   clientMessageId: string;
-  parentMessageId?: string;
+  replyToMessageId?: string;
 };

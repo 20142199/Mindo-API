@@ -13,7 +13,7 @@ Nhắn tin Mindo dùng REST để tải danh sách/lịch sử và Socket.IO đ�
 Client gửi:
 
 - `channel:join`, `channel:leave`: `{ channelId }`
-- `message:send`: `{ channelId, messageType, content?, attachments?: [{fileId}], clientMessageId, parentMessageId? }`
+- `message:send`: `{ channelId, messageType, content?, attachments?: [{fileId}], clientMessageId, replyToMessageId? }`
 - `message:edit`: `{ messageId, content }`
 - `message:delete`: `{ messageId }`
 - `typing:start`, `typing:stop`: `{ channelId }`
@@ -26,6 +26,10 @@ Server phát:
 
 `clientMessageId` phải là UUID v4. Khi app retry cùng ID, server trả `status: duplicate` và không tạo bản ghi thứ hai.
 
+Tin hệ thống (tạo nhóm, thêm/xóa thành viên) cũng được phát qua `message:new` như mọi tin khác, `sender` là `null`. Nó không sinh push notification.
+
+**Mọi enum trên phản hồi trả đúng dạng đã khai, tức CHỮ HOA** — `message_type`, `type` của hội thoại, `role` của thành viên. Trùng với dạng mà request phải gửi lên, nên client đọc gì ghi lại được nấy.
+
 ## REST
 
 Tất cả route dưới đây cần Bearer access token và có prefix `/api/v1/investor/chat`.
@@ -35,7 +39,7 @@ Tất cả route dưới đây cần Bearer access token và có prefix `/api/v1
 - `GET /conversations?page=1&limit=20&q=`: danh sách, tìm theo tên nhóm/người hoặc nội dung tin.
 - `POST /conversations/direct` body `{ "user_id": "..." }`: tạo/lấy lại chat 1–1 với một người bạn.
 - `POST /conversations/groups` body `{ "title": "...", "member_user_ids": ["..."], "avatar_file_id": "..." }`.
-- `GET /conversations/:conversationId`: chi tiết và danh sách thành viên.
+- `GET /conversations/:conversationId`: chi tiết và danh sách thành viên. Mỗi thành viên kèm `last_read_message_id` và `last_read_at` — dùng để dựng lại dấu "đã xem" cho tin cũ sau khi app mở lại, vì sự kiện `message:read` chỉ phục vụ phiên đang mở.
 - `DELETE /conversations/:conversationId`: ẩn hội thoại khỏi danh sách của chính người gọi.
 - `POST /conversations/:conversationId/read` body tùy chọn `{ "message_id": "..." }`.
 - `PATCH /conversations/:conversationId/mute` body `{ "is_muted": true }`.
@@ -62,7 +66,9 @@ Body gửi tin qua REST:
 }
 ```
 
-`message_type` nhận `TEXT`, `IMAGE`, `FILE`; `SYSTEM` chỉ server được tạo.
+`message_type` nhận `TEXT`, `IMAGE`, `FILE`; `SYSTEM` chỉ server được tạo. Phản hồi trả lại đúng dạng chữ hoa này.
+
+`POST /conversations/groups`, `POST /groups/:id/members` và `DELETE /groups/:id/members/:userId` trả thêm `system_message` — chính tin vừa được phát qua `message:new`.
 
 ### Nhóm
 

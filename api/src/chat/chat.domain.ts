@@ -50,6 +50,9 @@ export function parseSocketMessage(payload: unknown): SocketMessageSendDto {
     messageType: messageType as ChatMessageType,
     content,
     attachments,
-    parentMessageId: typeof value.parentMessageId === 'string' ? value.parentMessageId.trim() : undefined,
+    /* Cùng tên với `reply_to_message_id` của REST. Trước đây socket gọi là
+       `parentMessageId`, nên app phải dựng hai bộ tên cho cùng một việc gửi
+       tin — mà tài liệu lại khuyên dùng cả hai đường. */
+    replyToMessageId: typeof value.replyToMessageId === 'string' ? value.replyToMessageId.trim() : undefined,
   };
 }
