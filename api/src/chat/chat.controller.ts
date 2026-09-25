@@ -61,6 +61,7 @@ export class ChatController {
   async createGroup(@Req() req: AuthenticatedRequest, @Body() dto: CreateGroupConversationDto) {
     const data = await this.chat.createGroup(authUser(req).id, dto);
     await this.realtime.publishConversation(data.conversation_id);
+    this.realtime.publishSystemMessage(data.conversation_id, data.system_message);
     return ok(data, 'Đã tạo nhóm');
   }
 
@@ -137,6 +138,7 @@ export class ChatController {
   ) {
     const data = await this.chat.addMembers(authUser(req).id, conversationId, dto);
     await this.realtime.publishConversation(conversationId);
+    this.realtime.publishSystemMessage(conversationId, data.system_message);
     return ok(data, 'Đã thêm thành viên');
   }
 
@@ -149,6 +151,11 @@ export class ChatController {
     const data = await this.chat.removeMember(authUser(req).id, conversationId, userId);
     this.realtime.publishConversationRemoved(userId, conversationId, 'removed');
     await this.realtime.publishConversation(conversationId);
+    /* Người tự rời nhóm đi qua `leaveGroup`, đường đó không sinh tin hệ
+       thống nên không phải lúc nào cũng có. */
+    if ('system_message' in data) {
+      this.realtime.publishSystemMessage(conversationId, data.system_message);
+    }
     return ok(data, 'Đã cập nhật thành viên');
   }
 

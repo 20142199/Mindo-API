@@ -21,6 +21,32 @@ describe('chat domain', () => {
     }).content).toBe('Xin chào');
   });
 
+  /*
+    The socket payload used to call this `parentMessageId` while REST called
+    the same thing `reply_to_message_id`. The docs tell the app to use both
+    paths — socket first, REST as the fallback when the socket is down — so
+    the two names meant every client had to carry two shapes for one action,
+    and picking the wrong one silently dropped the reply link.
+  */
+  it('reads the reply link under the same name REST uses', () => {
+    expect(parseSocketMessage({
+      channelId: 'conversation-1',
+      clientMessageId: '21efbc58-c8be-4bc4-a942-1bd10e9d5f4c',
+      messageType: 'TEXT',
+      content: 'Vâng đúng rồi',
+      replyToMessageId: '  message-7  ',
+    }).replyToMessageId).toBe('message-7');
+  });
+
+  it('leaves the reply link empty when there is none', () => {
+    expect(parseSocketMessage({
+      channelId: 'conversation-1',
+      clientMessageId: '21efbc58-c8be-4bc4-a942-1bd10e9d5f4c',
+      messageType: 'TEXT',
+      content: 'Xin chào',
+    }).replyToMessageId).toBeUndefined();
+  });
+
   it('rejects attachment messages without files', () => {
     expect(() => parseSocketMessage({
       channelId: 'conversation-1',

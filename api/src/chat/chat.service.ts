@@ -116,8 +116,8 @@ export class ChatService {
         },
       },
     });
-    await this.createSystemMessage(conversation.id, `${await this.userName(userId)} đã tạo nhóm`);
-    return this.getConversation(userId, conversation.id);
+    const systemMessage = await this.createSystemMessage(userId, conversation.id, `${await this.userName(userId)} đã tạo nhóm`);
+    return { ...(await this.getConversation(userId, conversation.id)), system_message: systemMessage };
   }
 
   async listConversations(userId: string, query: ChatPageQueryDto) {
@@ -362,8 +362,8 @@ export class ChatService {
       where: { conversationId, userId: { in: ids } },
       data: { leftAt: null, isHidden: false },
     });
-    await this.createSystemMessage(conversationId, `${await this.userName(userId)} đã thêm ${ids.length} thành viên`);
-    return this.getConversation(userId, conversationId);
+    const systemMessage = await this.createSystemMessage(userId, conversationId, `${await this.userName(userId)} đã thêm ${ids.length} thành viên`);
+    return { ...(await this.getConversation(userId, conversationId)), system_message: systemMessage };
   }
 
   async removeMember(userId: string, conversationId: string, memberUserId: string) {
@@ -378,8 +378,8 @@ export class ChatService {
       where: { conversationId_userId: { conversationId, userId: memberUserId } },
       data: { leftAt: new Date(), isHidden: true },
     });
-    await this.createSystemMessage(conversationId, `${await this.userName(memberUserId)} đã được đưa ra khỏi nhóm`);
-    return { conversation_id: conversationId, removed_user_id: memberUserId };
+    const systemMessage = await this.createSystemMessage(userId, conversationId, `${await this.userName(memberUserId)} đã được đưa ra khỏi nhóm`);
+    return { conversation_id: conversationId, removed_user_id: memberUserId, system_message: systemMessage };
   }
 
   async leaveGroup(userId: string, conversationId: string) {
@@ -541,11 +541,31 @@ export class ChatService {
     return row;
   }
 
-  private async createSystemMessage(conversationId: string, content: string) {
+  /**
+   * Tin hệ thống ("… đã tạo nhóm", "… đã thêm 3 thành viên").
+   *
+   * TRẢ VỀ tin đã dựng xong, không phải `void`, vì nó còn phải được bắn qua
+   * Socket.IO. Service không tự bắn được: `ChatRealtimeService` đã import
+   * `ChatService` rồi, import ngược lại là vòng tròn. Nên mọi broadcast của
+   * cụm này nằm ở controller, và tin hệ thống phải đi ngược lên qua giá trị
+   * trả về để tới được đó.
+   *
+   * Trước khi có đường đi này, tin hệ thống chỉ nằm trong CSDL: người đang
+   * mở nhóm không thấy bong bóng nào, trong khi danh sách hội thoại của họ
+   * lại đã đổi preview sang đúng câu đó — hai chỗ trên cùng một màn nói hai
+   * điều khác nhau cho tới khi tải lại.
+   *
+   * Dựng payload với góc nhìn của người gây ra sự kiện là đủ cho MỌI người
+   * nhận: `is_own` so theo `senderId`, mà tin hệ thống không có người gửi
+   * (`null`), còn `is_saved` thì tin vừa tạo chưa ai lưu được.
+   */
+  private async createSystemMessage(userId: string, conversationId: string, content: string) {
     const row = await this.prisma.chatMessage.create({
       data: { conversationId, type: ChatMessageType.SYSTEM, content },
+      include: { sender: true },
     });
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: row.createdAt } });
+    return this.serializeMessage(userId, row);
   }
 
   private async serializeConversationRows(userId: string, rows: ConversationRow[], includeMembers = false) {
@@ -578,7 +598,7 @@ export class ChatService {
         : this.fileUrl(row.avatarFileId, files);
       return {
         conversation_id: row.id,
-        type: row.type.toLowerCase(),
+        type: row.type,
         title,
         avatar_url: avatar,
         member_count: row.members.length,
@@ -590,7 +610,7 @@ export class ChatService {
           sender_user_id: lastMessage.senderId,
           sender_name: lastMessage.sender?.nickname ?? lastMessage.sender?.fullName ?? null,
           is_own: lastMessage.senderId === userId,
-          message_type: lastMessage.type.toLowerCase(),
+          message_type: lastMessage.type,
           preview: lastMessage.deletedAt ? 'Tin nhắn đã được thu hồi' : messagePreview(lastMessage.type, lastMessage.content),
           created_at: lastMessage.createdAt.toISOString(),
         } : null,
@@ -599,8 +619,16 @@ export class ChatService {
         ...(includeMembers ? {
           members: row.members.map((member) => ({
             ...this.userProfile(member.user, files),
-            role: member.role.toLowerCase(),
+            role: member.role,
             is_online: Boolean(online.get(member.userId)),
+            /*
+              Mốc đã đọc của TỪNG người. Sự kiện `message:read` chỉ nói cho
+              thiết bị đang mở; đóng app rồi mở lại thì không còn gì dựng
+              được dấu "đã xem" cho tin cũ. CSDL vẫn giữ mốc này, chỉ là
+              trước đây không ai gửi nó ra.
+            */
+            last_read_message_id: member.lastReadMessageId,
+            last_read_at: member.lastReadAt?.toISOString() ?? null,
             joined_at: member.joinedAt.toISOString(),
           })),
         } : {}),
@@ -639,7 +667,7 @@ export class ChatService {
       conversation_id: row.conversationId,
       sender: row.sender ? this.userProfile(row.sender, files) : null,
       is_own: row.senderId === userId,
-      message_type: row.type.toLowerCase(),
+      message_type: row.type,
       content: row.deletedAt ? null : row.content,
       attachments: row.deletedAt ? [] : attachments,
       reply_to_message_id: row.replyToId,
