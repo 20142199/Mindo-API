@@ -14,7 +14,7 @@ import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import { EmailService } from '../common/email.service';
 import { PrismaService } from '../common/prisma.module';
 import { ChangePasswordDto, LoginDto, RefreshDto, RegisterDto, ResetPasswordDto, VerifyOtpDto } from './auth.dto';
-import { referralCode } from '../referral/referral.domain';
+import { isReferralCodeShape, referralCode } from '../referral/referral.domain';
 
 const hashToken = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -127,6 +127,11 @@ export class AuthService {
     let systemCodeId: string | undefined;
     if (dto.ref_by?.trim()) {
       const code = dto.ref_by.trim();
+      /* Chặn ký tự đại diện TRƯỚC khi tra: nhánh tra mã người dùng bên dưới đi
+         qua ILIKE, nên `%` không bị chặn sẽ khớp bừa. Xem `isReferralCodeShape`. */
+      if (!isReferralCodeShape(code)) {
+        throw new BadRequestException({ message: 'Mã giới thiệu không hợp lệ', code: 'AUTH_REFERRAL_INVALID' });
+      }
       const systemCode = await this.prisma.systemReferralCode.findUnique({ where: { code: code.toUpperCase() } });
       if (systemCode) {
         if (!systemCode.isActive || systemCode.claimedById) {
