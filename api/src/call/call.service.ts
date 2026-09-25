@@ -17,13 +17,17 @@ import { FileStorageService } from '../phase1/file-storage.service';
 import { AgoraService } from './agora.service';
 import { CALL_TIMEOUT_QUEUE } from './call.constants';
 import { CallClient, CallDirection, CallEndReason, CallHistoryQueryDto, InitiateCallDto } from './call.dto';
-import { ACTIVE_CALL_STATUSES, callDurationSeconds, callStatusLabels, isTerminalCallStatus } from './call.domain';
+import {
+  ACTIVE_CALL_STATUSES,
+  callDurationSeconds,
+  callStatusLabels,
+  isRingingExpired,
+  isTerminalCallStatus,
+  resolveRingingTimeoutMs,
+} from './call.domain';
 import { CallSignalKind, CallSignalingService } from './call-signaling.service';
 
-const configuredRingingTimeout = Number(process.env.CALL_RINGING_TIMEOUT_MS ?? 60_000);
-const RINGING_TIMEOUT_MS = Number.isFinite(configuredRingingTimeout) && configuredRingingTimeout >= 15_000
-  ? configuredRingingTimeout
-  : 60_000;
+const RINGING_TIMEOUT_MS = resolveRingingTimeoutMs(process.env.CALL_RINGING_TIMEOUT_MS);
 
 type CallWithUsers = Prisma.CallGetPayload<{ include: { caller: true; callee: true } }>;
 
@@ -47,6 +51,11 @@ export class CallService {
       select: { id: true },
     });
     if (!callee) throw new NotFoundException('Không tìm thấy người nhận cuộc gọi');
+
+    /* Trước khi hỏi "ai đang bận": một cuộc gọi quá hạn mà chưa ai đóng vẫn
+       nằm trong `ACTIVE_CALL_STATUSES`, nên nó sẽ khoá cả hai người khỏi mọi
+       cuộc gọi mới bằng `CALL_BUSY` — vĩnh viễn, nếu job hẹn giờ đã mất. */
+    await this.markExpiredRingingCalls();
 
     const callId = randomUUID();
     const channelName = `mindo-call-${callId}`;
@@ -91,6 +100,9 @@ export class CallService {
         { jobId: `call-timeout-${callId}`, delay: RINGING_TIMEOUT_MS, removeOnComplete: 100, removeOnFail: 100 },
       );
     } catch (error) {
+      /* Cố tình đi tiếp: mất hẹn giờ không đáng để mất luôn cuộc gọi. An
+         toàn vì `expireIfStale` và `markExpiredRingingCalls` sẽ đóng hộ ở
+         lần đọc kế tiếp — xem `isRingingExpired` trong `call.domain.ts`. */
       this.logger.error(`Không đặt được timeout cho cuộc gọi ${callId}: ${error instanceof Error ? error.message : String(error)}`);
     }
 
@@ -284,7 +296,38 @@ export class CallService {
     const row = await this.prisma.call.findUnique({ where: { id: callId }, include: { caller: true, callee: true } });
     if (!row) throw new NotFoundException('Không tìm thấy cuộc gọi');
     if (row.callerId !== userId && row.calleeId !== userId) throw new ForbiddenException('Bạn không thuộc cuộc gọi này');
-    return row;
+    return this.expireIfStale(row);
+  }
+
+  /**
+   * Lưới an toàn cho job BullMQ `expire-ringing-call`.
+   *
+   * Đặt ở `ownedCall` chứ không ở riêng `get`, vì mọi đường đi vào MỘT cuộc
+   * gọi cụ thể đều qua đây. Nhờ vậy cuộc gọi quá hạn không chỉ hiện đúng khi
+   * đọc, mà còn không thể `accept` được nữa — trước đây người nhận vẫn bấm
+   * nghe được cuộc gọi mà bên kia đã bỏ đi từ lâu.
+   *
+   * Ghi `timeout_recovery` chứ không ghi `timeout` như job: đọc `end_reason`
+   * là biết ngay job đã chạy hay lưới phải đỡ thay. Trùng với nhãn mà
+   * `markExpiredRingingCalls` vẫn dùng.
+   *
+   * Không bắn tín hiệu `call.missed` ở đây — `expireRingingCall` có bắn, còn
+   * đường này thì bên hỏi đã nhận câu trả lời ngay trong phản hồi, và bên
+   * kia nhận ở nhịp poll `incoming`/`active` của chính họ.
+   */
+  private async expireIfStale(row: CallWithUsers): Promise<CallWithUsers> {
+    if (!isRingingExpired(row, new Date(), RINGING_TIMEOUT_MS)) return row;
+    const endedAt = new Date();
+    const result = await this.prisma.call.updateMany({
+      where: { id: row.id, status: CallStatus.RINGING },
+      data: { status: CallStatus.MISSED, endedAt, endReason: 'timeout_recovery' },
+    });
+    /* Thua cuộc đua với job hoặc với một request khác: đọc lại cho đúng sự
+       thật thay vì đoán trạng thái đã ghi. */
+    if (result.count !== 1) {
+      return this.prisma.call.findUniqueOrThrow({ where: { id: row.id }, include: { caller: true, callee: true } });
+    }
+    return { ...row, status: CallStatus.MISSED, endedAt, endReason: 'timeout_recovery' };
   }
 
   private async view(row: CallWithUsers, viewerId: string) {

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { AiMessage, AiMessageKind, AiMessageRole, AiMessageStatus, Prisma } from '@prisma/client';
 import { Queue } from 'bullmq';
@@ -19,6 +19,8 @@ const AI_LANGUAGES = [
 
 @Injectable()
 export class AiService {
+  private readonly logger = new Logger(AiService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly provider: AiProviderService,
@@ -237,14 +239,32 @@ export class AiService {
       await tx.aiConversation.update({ where: { id: conversationId }, data: { ...(title ? { title } : {}), updatedAt: new Date() } });
       return { user_message: userMessage, assistant_message: assistantMessage };
     });
+    /*
+      Xếp hàng đợi nằm NGOÀI transaction, nên tới đây hai tin đã nằm trong
+      CSDL rồi. Hỏng ở dòng này mà cứ để lỗi bay ra ngoài là bỏ lại một tin
+      `PENDING` không ai xử lý: app mở lại hội thoại thấy ba chấm quay mãi,
+      còn `SSE /events` hỏi CSDL mỗi giây cho tới khi người dùng bỏ đi — vì
+      nó chỉ đóng khi không còn tin `PENDING` nào.
+
+      Nên phải tự dọn: đánh dấu `FAILED` để hội thoại có kết cục, rồi mới
+      báo lỗi.
+    */
     try {
       await this.enqueue(result.assistant_message.id, result.assistant_message.id);
-    } catch {
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'Không xếp được hàng đợi AI';
+      this.logger.error(`Không xếp được việc AI cho tin ${result.assistant_message.id}: ${reason}`);
       await this.prisma.aiMessage.update({
         where: { id: result.assistant_message.id },
-        data: { status: AiMessageStatus.FAILED, errorMessage: 'Không thể xếp lịch xử lý AI', completedAt: new Date() },
+        data: { status: AiMessageStatus.FAILED, errorMessage: reason, completedAt: new Date() },
       });
-      throw new ServiceUnavailableException('Không thể xếp lịch xử lý AI');
+      /* Gắn `code` vì 503 ở đây khác hẳn 503 của nhà cung cấp AI: lần này
+         chưa có gì được gửi đi, gửi lại là chạy ngay khi hàng đợi sống lại.
+         Không có mã thì app chỉ còn cách dò chữ tiếng Việt để phân biệt. */
+      throw new ServiceUnavailableException({
+        message: 'Trợ lý AI tạm thời không nhận thêm yêu cầu, vui lòng thử lại',
+        code: 'AI_QUEUE_UNAVAILABLE',
+      });
     }
     return result;
   }
@@ -394,7 +414,10 @@ export class AiService {
         where: { id: messageId },
         data: { status: AiMessageStatus.FAILED, errorMessage: 'Không thể xếp lịch thử lại', completedAt: new Date() },
       });
-      throw new ServiceUnavailableException('Không thể xếp lịch thử lại');
+      throw new ServiceUnavailableException({
+        message: 'Trợ lý AI tạm thời không nhận thêm yêu cầu, vui lòng thử lại',
+        code: 'AI_QUEUE_UNAVAILABLE',
+      });
     }
     return this.prisma.aiMessage.findUniqueOrThrow({ where: { id: messageId } });
   }
