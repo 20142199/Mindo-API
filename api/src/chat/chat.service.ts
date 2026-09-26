@@ -398,6 +398,7 @@ export class ChatService {
     const member = await this.assertMembership(userId, conversationId);
     const group = await this.prisma.conversation.findUnique({ where: { id: conversationId } });
     if (!group || group.type !== ConversationType.GROUP) throw new BadRequestException('Đây không phải hội thoại nhóm');
+    let dissolved = false;
     await this.prisma.$transaction(async (tx) => {
       if (member.role === ConversationMemberRole.OWNER) {
         const successor = await tx.conversationMember.findFirst({
@@ -411,6 +412,7 @@ export class ChatService {
           });
         } else {
           await tx.conversation.update({ where: { id: conversationId }, data: { deletedAt: new Date() } });
+          dissolved = true;
         }
       }
       await tx.conversationMember.update({
@@ -418,7 +420,14 @@ export class ChatService {
         data: { leftAt: new Date(), isHidden: true },
       });
     });
-    return { conversation_id: conversationId, left: true };
+    /* Người ở lại phải thấy có người đã đi, y như khi bị đưa ra khỏi nhóm.
+       Trừ lúc nhóm vừa tan — chủ nhóm rời đi mà không còn ai kế nhiệm: viết
+       tiếp vào một hội thoại đã xóa thì không ai đọc, mà `lastMessageAt` lại
+       bị đẩy lên. */
+    const systemMessage = dissolved
+      ? undefined
+      : await this.createSystemMessage(userId, conversationId, `${await this.userName(userId)} đã rời nhóm`);
+    return { conversation_id: conversationId, left: true, system_message: systemMessage };
   }
 
   async deleteGroup(userId: string, conversationId: string) {
