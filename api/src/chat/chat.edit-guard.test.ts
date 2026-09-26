@@ -48,11 +48,13 @@ function buildService(row: ReturnType<typeof messageRow>) {
     savedChatMessage: { findMany: () => Promise.resolve([]) },
   } as unknown as PrismaService;
 
+  /* Đúng ba tham số như `ChatService` khai báo. Bản đầu truyền bốn — vitest
+     không typecheck nên test vẫn xanh, nhưng `nest build` thì hỏng, và chỉ lộ
+     khi khởi động lại server. */
   const service = new ChatService(
     prisma,
     { view: () => ({ public_url: 'https://x' }) } as never,
-    { publishNewMessage: vi.fn(), publishMessageUpdate: vi.fn() } as never,
-    { notifyNewMessage: vi.fn() } as never,
+    { isOnline: () => false } as never,
   );
 
   return { service, update };
