@@ -51,7 +51,8 @@ Tất cả route dưới đây cần Bearer access token và có prefix `/api/v1
 - `GET /conversations/:conversationId/messages?cursor=&limit=50&q=`: phân trang lùi; response trả theo thứ tự thời gian tăng dần.
 - `POST /conversations/:conversationId/messages`: REST fallback khi socket chưa kết nối.
 - `PATCH /messages/:messageId`: sửa nội dung trong 72 giờ.
-- `DELETE /messages/:messageId`: thu hồi hai phía.
+- `DELETE /messages/:messageId`: thu hồi hai phía. Chỉ tác giả gọi được.
+- `DELETE /messages/:messageId/for-me`: xoá ở PHÍA MÌNH. Ai trong hội thoại cũng gọi được, kể cả với tin của người khác — không ai được xoá lời người khác đã nói, nhưng ai cũng cần dọn được hội thoại của chính mình. Tin gốc không đổi, người gửi và các thành viên còn lại vẫn thấy nguyên; những lần `GET /conversations/:id/messages` sau đó của riêng người gọi thì bỏ tin ấy ra. Gọi lặp lại không sao.
 - `POST /messages/:messageId/save`, `DELETE /messages/:messageId/save`.
 - `GET /saved-messages?page=1&limit=20&q=`.
 - `POST /attachments` multipart field `files`, tối đa 5 tệp, mỗi tệp 10 MB.
