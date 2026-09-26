@@ -481,6 +481,48 @@ export class ChatService {
     return this.getConversation(userId, conversationId);
   }
 
+  /**
+   * Dựng payload hội thoại cho NHIỀU người cùng lúc, đọc CSDL một lần.
+   *
+   * `publishConversation` lặp qua từng thành viên và gọi `getConversation`
+   * cho mỗi người — mà mỗi lần gọi là năm truy vấn: kiểm tư cách thành viên,
+   * đọc hội thoại kèm quan hệ, đọc trạng thái online, đọc tệp, đếm chưa đọc.
+   * Nhóm ba người thì không ai để ý; nhóm 99 người — mức trần
+   * `CreateGroupConversationDto` cho phép — là gần 500 truy vấn cho MỘT tin
+   * nhắn.
+   *
+   * Thứ thật sự khác nhau giữa những người nhận chỉ có bốn: số tin chưa đọc,
+   * `is_muted`, `is_own` của tin cuối, và với hội thoại 1-1 là tên/ảnh của
+   * "người kia". Tất cả đều suy ra được từ MỘT hàng đã đọc — trừ số chưa
+   * đọc, vốn phụ thuộc mốc `lastReadAt` riêng của từng người.
+   *
+   * Nên còn `3 + N` truy vấn thay vì `5N`, với N là số đếm rẻ.
+   *
+   * Bỏ `assertMembership`: danh sách người nhận đến từ
+   * `getMemberUserIds(conversationId)`, tức đã là thành viên rồi. Gọi lại là
+   * hỏi CSDL một câu mà mình vừa tự trả lời.
+   */
+  async getConversationItemsForMembers(conversationId: string, userIds: string[]) {
+    if (!userIds.length) return new Map<string, unknown>();
+    const row = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, deletedAt: null },
+      include: conversationInclude,
+    });
+    if (!row) return new Map<string, unknown>();
+
+    const shared = await this.conversationLookups([row]);
+    const items = await Promise.all(
+      userIds.map(async (userId) => {
+        /* Người vừa rời nhóm không còn trong `row.members`; bỏ qua thay vì
+           để `serializeConversationRows` vấp phải `ownMember` rỗng. */
+        if (!row.members.some((member) => member.userId === userId)) return null;
+        const [item] = await this.serializeConversationRows(userId, [row], true, shared);
+        return [userId, item] as const;
+      }),
+    );
+    return new Map(items.filter((entry): entry is NonNullable<typeof entry> => entry !== null));
+  }
+
   async assertMembership(userId: string, conversationId: string) {
     const row = await this.prisma.conversationMember.findFirst({
       where: { userId, conversationId, leftAt: null, conversation: { deletedAt: null } },
@@ -589,7 +631,14 @@ export class ChatService {
     return this.serializeMessage(userId, row);
   }
 
-  private async serializeConversationRows(userId: string, rows: ConversationRow[], includeMembers = false) {
+  /**
+   * Hai thứ tra cứu KHÔNG phụ thuộc người xem: ai đang online, và ảnh đại
+   * diện của ai là tệp nào.
+   *
+   * Tách ra để dựng payload cho cả phòng chỉ tốn một lần — xem
+   * `getConversationItemsForMembers`.
+   */
+  private async conversationLookups(rows: ConversationRow[]) {
     const memberUserIds = rows.flatMap((row) => row.members.map((member) => member.userId));
     const online = await this.presence.onlineMap(memberUserIds);
     const fileIds = [...new Set(rows.flatMap((row) => [
@@ -597,7 +646,16 @@ export class ChatService {
       ...row.members.map((member) => member.user.avatarFileId),
     ]).filter((id): id is string => Boolean(id)))];
     const fileRows = fileIds.length ? await this.prisma.fileUpload.findMany({ where: { id: { in: fileIds } } }) : [];
-    const files = new Map(fileRows.map((file) => [file.id, file]));
+    return { online, files: new Map(fileRows.map((file) => [file.id, file])) };
+  }
+
+  private async serializeConversationRows(
+    userId: string,
+    rows: ConversationRow[],
+    includeMembers = false,
+    shared?: Awaited<ReturnType<ChatService['conversationLookups']>>,
+  ) {
+    const { online, files } = shared ?? (await this.conversationLookups(rows));
     return Promise.all(rows.map(async (row) => {
       const ownMember = row.members.find((member) => member.userId === userId)!;
       const peers = row.members.filter((member) => member.userId !== userId);
