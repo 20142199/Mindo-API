@@ -61,6 +61,14 @@ export class CallController {
     return this.calls.accept(authUser(req).id, callId, dto.client_platform).then((data) => ok(data, 'Đã nhận cuộc gọi'));
   }
 
+  /**
+   * Chuyển cuộc gọi thoại đang nói sang video — không ai phải đổ chuông lại.
+   */
+  @Post(':callId/upgrade')
+  upgrade(@Req() req: AuthenticatedRequest, @Param('callId') callId: string) {
+    return this.calls.upgradeToVideo(authUser(req).id, callId).then((data) => ok(data, 'Đã chuyển sang gọi video'));
+  }
+
   @Post(':callId/reject')
   reject(@Req() req: AuthenticatedRequest, @Param('callId') callId: string) {
     return this.calls.reject(authUser(req).id, callId).then((data) => ok(data, 'Đã từ chối cuộc gọi'));

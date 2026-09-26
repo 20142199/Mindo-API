@@ -70,6 +70,9 @@ function buildService(row: ReturnType<typeof ringingCall>) {
       },
       create: () => Promise.resolve(row),
       updateMany,
+      /* `accept` nay gác hộ mọi cuộc gọi còn sống khác của người nhận — xem
+         `hangUpOtherCalls`. Ở đây không có cuộc nào khác. */
+      findMany: () => Promise.resolve([]),
     },
     user: { findFirst: () => Promise.resolve({ id: users.callee.id }) },
     fileUpload: { findMany: () => Promise.resolve([]) },
@@ -171,6 +174,10 @@ describe('a forgotten ringing call does not brick new calls', () => {
 
     await service.initiate(users.caller.id, { callee_user_id: users.callee.id, call_type: CallType.AUDIO } as never);
 
-    expect(trail).toEqual(['sweep', 'busy-check']);
+    /* The sweep must come first; how many reads follow is an implementation
+       detail — `initiate` now runs two (one for "am I busy", one for "am I
+       already ringing this person"). */
+    expect(trail[0]).toBe('sweep');
+    expect(trail.slice(1).every((step) => step === 'busy-check')).toBe(true);
   });
 });
