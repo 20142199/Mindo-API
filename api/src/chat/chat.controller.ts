@@ -151,9 +151,9 @@ export class ChatController {
     const data = await this.chat.removeMember(authUser(req).id, conversationId, userId);
     this.realtime.publishConversationRemoved(userId, conversationId, 'removed');
     await this.realtime.publishConversation(conversationId);
-    /* Người tự rời nhóm đi qua `leaveGroup`, đường đó không sinh tin hệ
-       thống nên không phải lúc nào cũng có. */
-    if ('system_message' in data) {
+    /* Tự đưa mình ra khỏi nhóm thì rơi sang `leaveGroup`, và đường đó bỏ
+       trống tin hệ thống khi nhóm vừa tan. */
+    if (data.system_message) {
       this.realtime.publishSystemMessage(conversationId, data.system_message);
     }
     return ok(data, 'Đã cập nhật thành viên');
@@ -165,6 +165,9 @@ export class ChatController {
     const data = await this.chat.leaveGroup(userId, conversationId);
     this.realtime.publishConversationRemoved(userId, conversationId, 'left');
     await this.realtime.publishConversation(conversationId);
+    if (data.system_message) {
+      this.realtime.publishSystemMessage(conversationId, data.system_message);
+    }
     return ok(data, 'Đã rời nhóm');
   }
 
