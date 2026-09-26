@@ -243,6 +243,18 @@ export class ChatService {
   async editMessage(userId: string, messageId: string, dto: EditChatMessageDto) {
     const row = await this.ownedMessage(userId, messageId);
     if (row.deletedAt) throw new ConflictException('Tin nhắn đã bị thu hồi');
+    /*
+      Chỉ tin CHỮ mới sửa được.
+      Endpoint này chỉ ghi đè cột `content`, không đụng gì tới `attachments`.
+      Với tin ảnh hay tệp thì nó nhận rồi lưu một đoạn chữ vào cạnh tệp vẫn
+      nguyên đó — client không vẽ đoạn chữ ấy ở đâu cả (bong bóng ảnh chỉ vẽ
+      ảnh), nhưng dòng xem trước ở danh sách hội thoại thì có. Kết quả là một
+      tin ảnh mang dòng xem trước bịa ra, và không cách nào gỡ.
+      Trả 400 thẳng, còn hơn nhận một thay đổi rồi giấu nó đi.
+    */
+    if (row.type !== ChatMessageType.TEXT) {
+      throw new BadRequestException('Chỉ sửa được tin nhắn dạng chữ');
+    }
     if (Date.now() - row.createdAt.getTime() > 72 * 60 * 60 * 1000) {
       throw new ForbiddenException('Chỉ được sửa tin nhắn trong vòng 72 giờ');
     }

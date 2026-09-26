@@ -28,6 +28,8 @@ Server phát:
 
 Tin hệ thống (tạo nhóm, thêm/xóa thành viên) cũng được phát qua `message:new` như mọi tin khác, `sender` là `null`. Nó không sinh push notification.
 
+**`message:new` và `message:updated` KHÔNG kèm `is_own`.** Trường đó trả lời câu "tin này có phải của bạn không", nên nó chỉ có nghĩa trên phản hồi REST — nơi có đúng một người hỏi. Một bản tin phát sóng thì không có "bạn" nào cả. Client tự so `message.sender.user_id` với user id của chính mình; đó cũng là cách duy nhất đúng, vì chỉ client mới biết nó đang đăng nhập bằng tài khoản nào.
+
 **Mọi enum trên phản hồi trả đúng dạng đã khai, tức CHỮ HOA** — `message_type`, `type` của hội thoại, `role` của thành viên. Trùng với dạng mà request phải gửi lên, nên client đọc gì ghi lại được nấy.
 
 ## REST
@@ -67,6 +69,24 @@ Body gửi tin qua REST:
 ```
 
 `message_type` nhận `TEXT`, `IMAGE`, `FILE`; `SYSTEM` chỉ server được tạo. Phản hồi trả lại đúng dạng chữ hoa này.
+
+Gửi kèm `reply_to_message_id` thì mọi phản hồi sau đó mang thêm `quoted_message` — một ảnh chụp tin gốc, chốt lại ngay lúc gửi nên không đổi theo nếu tin gốc bị sửa hay thu hồi về sau:
+
+```json
+{
+  "reply_to_message_id": "cmuh5ubya0003p6ubofqcxmi2",
+  "quoted_message": {
+    "kind": "REPLY",
+    "source_message_id": "cmuh5ubya0003p6ubofqcxmi2",
+    "source_sender_name": "Nguyen Hong Son Nickname",
+    "source_message_type": "TEXT",
+    "content_preview": "Chào B, tin thật đầu tiên",
+    "attachment_file_id": "…"
+  }
+}
+```
+
+Tên trường bên trong có tiền tố `source_`, KHÔNG phải `message_id`/`sender_name`/`preview`. `attachment_file_id` chỉ xuất hiện khi tin gốc có tệp đính kèm, `content_preview` cắt ở 200 ký tự. Đoán tên khác đi thì client không văng lỗi — nó dựng ra một khối trích dẫn rỗng, đúng một vạch màu không chữ, và chỉ lộ ra khi tải lại màn.
 
 `POST /conversations/groups`, `POST /groups/:id/members` và `DELETE /groups/:id/members/:userId` trả thêm `system_message` — chính tin vừa được phát qua `message:new`.
 
