@@ -123,17 +123,25 @@ export class ChatRealtimeService implements OnModuleDestroy {
     void this.publishConversation(conversationId);
   }
 
+  /**
+   * Bắn hội thoại đã cập nhật về cho TẤT CẢ thành viên.
+   *
+   * Mỗi người nhận một payload riêng vì bốn trường phụ thuộc người xem: số
+   * tin chưa đọc, `is_muted`, `is_own` của tin cuối, và với hội thoại 1-1 là
+   * tên/ảnh của "người kia".
+   *
+   * Nhưng phần còn lại thì giống hệt nhau, nên đọc CSDL MỘT lần rồi dựng N
+   * payload — xem `getConversationItemsForMembers`. Bản đầu gọi
+   * `getConversationItemForUser` cho từng người, tức năm truy vấn nhân N:
+   * nhóm 99 người là gần 500 truy vấn cho một tin nhắn.
+   */
   async publishConversation(conversationId: string) {
     if (!this.namespace) return;
     const userIds = await this.chat.getMemberUserIds(conversationId);
-    await Promise.all(userIds.map(async (userId) => {
-      try {
-        const item = await this.chat.getConversationItemForUser(userId, conversationId);
-        this.namespace?.to(this.userRoom(userId)).emit('conversation:updated', { item });
-      } catch {
-        // Thành viên vừa rời nhóm hoặc nhóm vừa bị xóa: không còn item để dựng.
-      }
-    }));
+    const items = await this.chat.getConversationItemsForMembers(conversationId, userIds);
+    for (const [userId, item] of items) {
+      this.namespace.to(this.userRoom(userId)).emit('conversation:updated', { item });
+    }
   }
 
   async publishGroupDeleted(conversationId: string, data: Record<string, unknown>) {
