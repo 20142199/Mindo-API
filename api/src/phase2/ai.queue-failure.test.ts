@@ -52,6 +52,7 @@ function buildService(queueAdd: () => Promise<unknown>) {
 
   const prisma = {
     aiConversation: { findFirst: () => Promise.resolve(conversation) },
+    nftAsset: { count: () => Promise.resolve(0) },
     aiMessage: {
       count: () => Promise.resolve(0),
       /* `sendMessage` nay chặn gửi tiếp khi hội thoại còn một tin đang chờ
