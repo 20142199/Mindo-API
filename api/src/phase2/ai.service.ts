@@ -8,6 +8,7 @@ import { PrismaService } from '../common/prisma.module';
 import { FileStorageService } from '../phase1/file-storage.service';
 import { AiContextMessage, AiProviderService } from './ai-provider.service';
 import { AiConversationQueryDto, AiMessageQueryDto, CreateAiConversationDto, CreateAiMessageDto, UpsertAiExpertDto } from './phase2.dto';
+import { aspectRatioOf, imageStyleOf } from './ai-image.options';
 
 const AI_LANGUAGES = [
   { code: 'vi', label: 'Tiếng Việt' },
@@ -294,6 +295,10 @@ export class AiService {
             requestedAt: new Date().toISOString(),
             ...(sourceLanguage ? { sourceLanguage: sourceLanguage.code } : {}),
             ...(targetLanguage ? { targetLanguage: targetLanguage.code } : {}),
+            /* Lưu ở tin trả lời để /retry dùng lại và phiên cũ biết tỷ lệ */
+            ...(kind === AiMessageKind.IMAGE
+              ? { imageStyle: imageStyleOf(dto.image_style), aspectRatio: aspectRatioOf(dto.aspect_ratio) }
+              : {}),
           },
         },
       });
