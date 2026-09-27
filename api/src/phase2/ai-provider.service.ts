@@ -1,6 +1,6 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { AiExpert, AiMessageKind } from '@prisma/client';
-import { AiAspectRatio, AiImageStyle, aspectRatioOf, imageDimensions, imageStyleOf, styledPrompt } from './ai-image.options';
+import { AiAspectRatio, AiImageStyle, aspectRatioOf, imageDimensions, imageStyleOf, sanitizeTitle, styledPrompt } from './ai-image.options';
 
 export type AiContextMessage = { role: 'user' | 'assistant'; content: string };
 export type AiInputFile = { name: string; mimeType: string; content: Buffer };
@@ -90,6 +90,30 @@ export class AiProviderService {
       last_vendor: lastError?.vendor,
       provider_status: lastError?.status,
     });
+  }
+
+  /**
+   * Tóm mô tả ảnh thành tiêu đề 2–5 chữ.
+   *
+   * Không bao giờ ném: mọi đường hỏng trả `null`, người gọi lùi về mô tả cắt
+   * ngắn đang có. Đi đúng thứ tự nhà cung cấp chữ như `generate`.
+   */
+  async summarizeTitle(prompt: string, signal?: AbortSignal): Promise<string | null> {
+    if (process.env.AI_MOCK !== 'false') return null;
+    const systemPrompt = 'Đặt tiêu đề ngắn từ 2 đến 5 chữ cho bức ảnh được mô tả. Giữ ngôn ngữ của mô tả. Chỉ trả về tiêu đề, không ngoặc kép, không dấu chấm.';
+    const primary = this.vendor(process.env.LLM_PRIMARY_VENDOR, 'gemini');
+    const fallback = this.vendor(process.env.LLM_FALLBACK_VENDOR, 'deepseek');
+    for (const vendor of [...new Set<AiVendor>([primary, fallback])]) {
+      try {
+        const result = vendor === 'gemini'
+          ? await this.completeGemini(systemPrompt, prompt, { signal })
+          : await this.completeDeepSeek(systemPrompt, prompt, { signal });
+        return sanitizeTitle(result.content);
+      } catch {
+        if (signal?.aborted) return null;
+      }
+    }
+    return null;
   }
 
   private async completeGemini(systemPrompt: string, input: string, options: AiGenerateOptions): Promise<ProviderTextResult> {

@@ -297,4 +297,35 @@ describe('AiProviderService', () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(body.generationConfig.imageConfig).toEqual({ aspectRatio: '4:3' });
   });
+  describe('summarizeTitle', () => {
+    it('lấy tiêu đề từ model chữ và dọn ngoặc, dấu chấm', async () => {
+      process.env.AI_MOCK = 'false';
+      process.env.GEMINI_API_KEY = 'gemini-key';
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true, status: 200,
+        json: async () => ({ candidates: [{ content: { parts: [{ text: '"Robot Mindo 3D".' }] } }] }),
+      }));
+
+      await expect(new AiProviderService().summarizeTitle('Tạo robot trợ lý 3D thân thiện')).resolves.toBe('Robot Mindo 3D');
+    });
+
+    it('cả hai nhà đều hỏng thì trả null, KHÔNG ném', async () => {
+      /* Tiêu đề là bước phụ — ném ra ở đây là đánh sập cả tấm ảnh đã tạo xong */
+      process.env.AI_MOCK = 'false';
+      process.env.GEMINI_API_KEY = 'gemini-key';
+      process.env.DEEPSEEK_API_KEY = 'ds-key';
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+
+      await expect(new AiProviderService().summarizeTitle('mèo')).resolves.toBeNull();
+    });
+
+    it('chế độ mock không gọi mạng', async () => {
+      delete process.env.AI_MOCK;
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(new AiProviderService().summarizeTitle('mèo')).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
 });
