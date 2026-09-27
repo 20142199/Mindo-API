@@ -87,6 +87,17 @@ export class ChatRealtimeService implements OnModuleDestroy {
   }
 
   /**
+   * Như `publishSystemMessage`, nhưng tự đọc và dựng payload từ id tin.
+   *
+   * Cho những luồng sinh ra tin HỆ THỐNG bên ngoài cụm Nhắn tin — nhật ký cuộc
+   * gọi ghi thẳng bằng Prisma nên không có sẵn payload kiểu REST để phát.
+   */
+  async publishSystemMessageById(conversationId: string, messageId: string, viewerId: string) {
+    const message = await this.chat.messageView(viewerId, messageId);
+    this.publishSystemMessage(conversationId, message as unknown as Record<string, unknown>);
+  }
+
+  /**
    * Bắn một tin vào phòng hội thoại, GỠ `is_own` ra trước.
    *
    * `is_own` là một khẳng định TƯƠNG ĐỐI với người hỏi: nó trả lời câu "tin

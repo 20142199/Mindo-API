@@ -59,7 +59,17 @@ export class CallChatLogService {
         data: { lastMessageAt: row.createdAt },
       });
 
-      /* Đẩy cho cả hai máy thấy ngay, không đợi họ mở lại hội thoại. */
+      /* Hai lần đẩy, và cần CẢ HAI — chúng tới hai chỗ khác nhau:
+           `publishSystemMessageById` bắn `message:new` vào PHÒNG HỘI THOẠI,
+              cho màn chat đang mở;
+           `publishConversation` bắn `conversation:updated` vào phòng riêng
+              của từng người, cho DANH SÁCH tin nhắn.
+
+         Thiếu cái đầu thì dòng nhật ký không hiện cho tới khi người dùng
+         thoát ra rồi vào lại — đúng thứ đo được trên iPhone 14 Pro Max ngày
+         27/09/2026: cúp máy, bấm "Đóng", về hội thoại mà không thấy gì, trong
+         khi danh sách ngoài đã đổi. */
+      await this.realtime.publishSystemMessageById(conversationId, row.id, call.callerId);
       await this.realtime.publishConversation(conversationId);
     } catch (error) {
       this.logger.warn(
