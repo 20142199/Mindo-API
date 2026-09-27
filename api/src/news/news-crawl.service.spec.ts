@@ -12,6 +12,12 @@ function setup(article: Record<string, unknown>) {
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       update: vi.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'article-1', ...data })),
     },
+    newsTopic: {
+      findMany: vi.fn().mockResolvedValue([
+        { id: 'topic-macro', slug: 'vi-mo', name: 'Vĩ mô' },
+        { id: 'topic-stocks', slug: 'chung-khoan', name: 'Chứng khoán' },
+      ]),
+    },
   };
   const ai = {
     isConfigured: vi.fn().mockReturnValue(true),
@@ -23,6 +29,7 @@ function setup(article: Record<string, unknown>) {
       content: 'Nội dung tiếng Việt đã được biên tập đầy đủ để hiển thị trên ứng dụng Mindo.',
       model: 'gpt-test',
       usage: { inputTokens: 120, outputTokens: 80, totalTokens: 200 },
+      topicSlug: 'vi-mo',
     }),
   };
   return {
@@ -65,5 +72,25 @@ describe('NewsCrawlService manual AI editorial', () => {
         aiEditorialTotalTokens: 200,
       }),
     }));
+  });
+
+  it('gives an article without a topic the one the AI picked', async () => {
+    const { service, prisma, ai } = setup({ id: 'article-1', sourceTitle: 'Source title', sourceContent: 'Source body', externalKey: 'abc', topicId: null });
+    await service.editorializeArticleById('article-1');
+    expect(ai.createEditorialDraft).toHaveBeenCalledWith('Source title', 'Source body', [{ slug: 'vi-mo', name: 'Vĩ mô' }, { slug: 'chung-khoan', name: 'Chứng khoán' }]);
+    expect(prisma.newsArticle.update.mock.calls[0][0].data.topicId).toBe('topic-macro');
+  });
+
+  it('never overrides a topic an admin already set', async () => {
+    const { service, prisma } = setup({ id: 'article-1', sourceTitle: 'Source title', sourceContent: 'Source body', externalKey: 'abc', topicId: 'topic-stocks' });
+    await service.editorializeArticleById('article-1');
+    expect(prisma.newsArticle.update.mock.calls[0][0].data).not.toHaveProperty('topicId');
+  });
+
+  it('leaves the topic empty when the AI found no fitting one', async () => {
+    const { service, prisma, ai } = setup({ id: 'article-1', sourceTitle: 'Source title', sourceContent: 'Source body', externalKey: 'abc', topicId: null });
+    ai.createEditorialDraft.mockResolvedValueOnce({ ...(await ai.createEditorialDraft()), topicSlug: null });
+    await service.editorializeArticleById('article-1');
+    expect(prisma.newsArticle.update.mock.calls[0][0].data.topicId).toBeNull();
   });
 });

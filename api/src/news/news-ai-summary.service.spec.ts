@@ -43,6 +43,7 @@ describe('NewsAiSummaryService', () => {
       content: editorialContent,
       model: 'gemini/summary-model',
       usage: { inputTokens: 120, outputTokens: 80, totalTokens: 200 },
+      topicSlug: null,
     });
     const request = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
       systemInstruction: { parts: Array<{ text: string }> };
@@ -54,6 +55,36 @@ describe('NewsAiSummaryService', () => {
     expect(request.generationConfig.responseSchema.required).toEqual(['title', 'short_summary', 'summary_lines', 'content']);
     expect(request.systemInstruction.parts[0].text).toContain('bản tin độc lập bằng tiếng Việt');
     expect(request.contents[0].parts[0].text).toContain('Market news');
+  });
+
+  it('asks the AI to pick one of the active topics and keeps only a known slug', async () => {
+    process.env.AI_MOCK = 'false';
+    process.env.GEMINI_API_KEY = 'test-key';
+    const reply = (topicSlug: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+        title: 'Tiêu đề tiếng Việt', short_summary: 'Mô tả.', summary_lines: ['Một.', 'Hai.', 'Ba.', 'Bốn.'],
+        content: 'Nội dung tiếng Việt đủ dài để qua bước kiểm tra độ đầy đủ của bản biên tập, giữ nguyên số liệu và dữ kiện của nguồn.',
+        topic_slug: topicSlug,
+      }) }] } }] }),
+    });
+    const fetchMock = vi.fn().mockResolvedValueOnce(reply('vi-mo')).mockResolvedValueOnce(reply('the-thao'));
+    vi.stubGlobal('fetch', fetchMock);
+    const topics = [{ slug: 'vi-mo', name: 'Vĩ mô' }, { slug: 'chung-khoan', name: 'Chứng khoán' }];
+
+    const known = await new NewsAiSummaryService().createEditorialDraft('Fed holds rates', 'Nội dung nguồn.', topics);
+    const unknown = await new NewsAiSummaryService().createEditorialDraft('Fed holds rates', 'Nội dung nguồn.', topics);
+
+    expect(known.topicSlug).toBe('vi-mo');
+    expect(unknown.topicSlug).toBeNull();
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
+      systemInstruction: { parts: Array<{ text: string }> };
+      generationConfig: { responseSchema: { required: string[]; properties: { topic_slug: { enum: string[] } } } };
+    };
+    expect(request.generationConfig.responseSchema.required).toContain('topic_slug');
+    expect(request.generationConfig.responseSchema.properties.topic_slug.enum).toEqual(['vi-mo', 'chung-khoan', 'none']);
+    expect(request.systemInstruction.parts[0].text).toContain('vi-mo (Vĩ mô)');
   });
 
   it('rejects an incomplete editorial response', async () => {

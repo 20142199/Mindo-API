@@ -49,8 +49,16 @@ export class NewsController {
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('me')
   me(@Req() req: AuthenticatedRequest) { return this.news.profile(authUser(req).id).then((data) => ok(data)); }
 
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('me/ai-summary-usage')
+  aiSummaryUsage(@Req() req: AuthenticatedRequest) { return this.news.aiSummaryUsage(authUser(req).id).then((data) => ok(data)); }
+
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Patch('me/interests')
   interests(@Req() req: AuthenticatedRequest, @Body() dto: SetNewsInterestsDto) { return this.news.setInterests(authUser(req).id, dto.topic_ids).then((data) => ok(data, 'Đã cập nhật lĩnh vực quan tâm')); }
+
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Post('articles/:id/ai-summary')
+  unlockAiSummary(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+    return this.news.unlockAiSummary(authUser(req).id, id).then((data) => ok(data, data.charged ? 'Đã mở bản tóm tắt AI' : 'Thành công'));
+  }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Post('articles/:id/like')
   like(@Req() req: AuthenticatedRequest, @Param('id') id: string) { return this.news.like(authUser(req).id, id).then((data) => ok(data)); }

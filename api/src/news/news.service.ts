@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ArticleStatus, NewsContentType, NewsFeedbackType, Prisma } from '@prisma/client';
 import { pageExtra } from '../common/api-response';
 import { PrismaService } from '../common/prisma.module';
@@ -11,12 +11,23 @@ const articleInclude = {
   _count: { select: { likes: true } },
 } satisfies Prisma.NewsArticleInclude;
 
+/** Những gì một người đã ẩn khỏi bảng tin của mình — xem `hiddenFor`. */
+type HiddenNews = { articleIds: string[]; topicIds: string[]; sourceIds: string[] };
+
+const NOTHING_HIDDEN: HiddenNews = { articleIds: [], topicIds: [], sourceIds: [] };
+
+/** Việt Nam không áp dụng DST, nên lệch UTC+7 cố định quanh năm. */
+const VIETNAM_OFFSET_MS = 7 * 60 * 60 * 1_000;
+
+/** Phần của Prisma mà việc đếm hạn mức cần — dùng được cả trong transaction. */
+type UsageClient = Pick<Prisma.TransactionClient, 'newsAiSummaryUnlock' | 'nftAsset'>;
+
 @Injectable()
 export class NewsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async home(userId?: string) {
-    const hidden = userId ? await this.hiddenFor(userId) : { articleIds: [], topicIds: [] };
+    const visible = this.visibleFilters(userId ? await this.hiddenFor(userId) : NOTHING_HIDDEN);
     const [experts, articles, waves] = await Promise.all([
       this.prisma.newsExpert.findMany({
         where: { isActive: true },
@@ -25,13 +36,13 @@ export class NewsService {
         take: 10,
       }),
       this.prisma.newsArticle.findMany({
-        where: { status: ArticleStatus.PUBLISHED, contentType: NewsContentType.ARTICLE, id: { notIn: hidden.articleIds }, topicId: { notIn: hidden.topicIds } },
+        where: { status: ArticleStatus.PUBLISHED, contentType: NewsContentType.ARTICLE, AND: visible },
         include: articleInclude,
         orderBy: { publishedAt: 'desc' },
         take: 20,
       }),
       this.prisma.newsArticle.findMany({
-        where: { status: ArticleStatus.PUBLISHED, contentType: NewsContentType.WAVE, id: { notIn: hidden.articleIds }, topicId: { notIn: hidden.topicIds } },
+        where: { status: ArticleStatus.PUBLISHED, contentType: NewsContentType.WAVE, AND: visible },
         include: articleInclude,
         orderBy: { publishedAt: 'desc' },
         take: 10,
@@ -47,21 +58,28 @@ export class NewsService {
 
   async listArticles(query: ListNewsDto, userId?: string, admin = false) {
     const skip = (query.page - 1) * query.limit;
-    const hidden = !admin && userId ? await this.hiddenFor(userId) : { articleIds: [], topicIds: [] };
+    const forYou = !admin && query.feed === 'for_you' ? await this.interestTopicIds(userId) : undefined;
+    /*
+      Chưa chọn lĩnh vực nào thì "Dành cho bạn" rỗng theo định nghĩa. Trả luôn,
+      đừng để `topicId: { in: [] }` đi xuống DB chỉ để nhận về con số 0.
+    */
+    if (forYou && !forYou.length) return { data: [], extra: pageExtra(query.page, query.limit, 0) };
+    const hidden = !admin && userId ? await this.hiddenFor(userId) : NOTHING_HIDDEN;
     const where: Prisma.NewsArticleWhereInput = {
       ...(admin ? {} : { status: ArticleStatus.PUBLISHED }),
       ...(query.q ? { OR: [{ title: { contains: query.q, mode: 'insensitive' } }, { summary: { contains: query.q, mode: 'insensitive' } }, { aiSummary: { contains: query.q, mode: 'insensitive' } }, { content: { contains: query.q, mode: 'insensitive' } }] } : {}),
       ...(query.topic ? { topic: { slug: query.topic } } : {}),
       ...(query.expert ? { expert: { slug: query.expert } } : {}),
       ...(query.type ? { contentType: query.type } : {}),
-      ...(!admin ? { id: { notIn: hidden.articleIds }, topicId: { notIn: hidden.topicIds } } : {}),
+      ...(forYou ? { topicId: { in: forYou } } : {}),
+      AND: this.visibleFilters(hidden),
     };
     const [rows, total] = await Promise.all([
       this.prisma.newsArticle.findMany({ where, include: articleInclude, orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }], skip, take: query.limit }),
       this.prisma.newsArticle.count({ where }),
     ]);
     const likes = userId ? await this.likedIds(userId, rows.map((row) => row.id)) : new Set<string>();
-    return { data: rows.map((row) => this.articleView(row, likes.has(row.id), admin)), extra: pageExtra(query.page, query.limit, total) };
+    return { data: rows.map((row) => this.articleView(row, likes.has(row.id), { admin })), extra: pageExtra(query.page, query.limit, total) };
   }
 
   async article(idOrSlug: string, userId?: string) {
@@ -70,8 +88,14 @@ export class NewsService {
       include: articleInclude,
     });
     if (!row) throw new NotFoundException('Bài viết không tồn tại');
-    const liked = userId ? (await this.prisma.newsArticleLike.count({ where: { userId, articleId: row.id } })) > 0 : false;
-    return this.articleView(row, liked);
+    const [likes, unlocks] = userId
+      ? await Promise.all([
+        this.prisma.newsArticleLike.count({ where: { userId, articleId: row.id } }),
+        this.prisma.newsAiSummaryUnlock.count({ where: { userId, articleId: row.id } }),
+      ])
+      : [0, 0];
+    const unlocked = unlocks > 0;
+    return { ...this.articleView(row, likes > 0, { revealAiSummary: unlocked }), ai_summary_unlocked: unlocked };
   }
 
   async search(keyword: string, limit: number, userId?: string) {
@@ -133,11 +157,18 @@ export class NewsService {
 
   async profile(userId: string) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { id: true, fullName: true, nickname: true, avatarFileId: true } });
-    const [interests, experts] = await Promise.all([
+    const [interests, experts, hidden] = await Promise.all([
       this.prisma.newsUserInterest.findMany({ where: { userId }, include: { topic: true }, orderBy: { topic: { sortOrder: 'asc' } } }),
       this.prisma.newsExpertFollow.findMany({ where: { userId }, include: { expert: { include: { _count: { select: { followers: true, articles: true } } } } }, orderBy: { createdAt: 'desc' } }),
+      this.hiddenFor(userId),
     ]);
-    return { user: { id: user.id, full_name: user.nickname ?? user.fullName, avatar_url: user.avatarFileId }, interests: interests.map((row) => row.topic), followed_experts: experts.map((row) => this.expertView(row.expert, true)) };
+    return {
+      user: { id: user.id, full_name: user.nickname ?? user.fullName, avatar_url: user.avatarFileId },
+      interests: interests.map((row) => row.topic),
+      followed_experts: experts.map((row) => this.expertView(row.expert, true)),
+      /* App bỏ chip của các lĩnh vực này ở tab "Tất cả" — bấm vào chỉ ra danh sách rỗng. */
+      hidden_topic_ids: hidden.topicIds,
+    };
   }
 
   async setInterests(userId: string, topicIds: string[]) {
@@ -147,6 +178,13 @@ export class NewsService {
     await this.prisma.$transaction(async (tx) => {
       await tx.newsUserInterest.deleteMany({ where: { userId } });
       if (unique.length) await tx.newsUserInterest.createMany({ data: unique.map((topicId) => ({ userId, topicId })) });
+      /*
+        Chọn lại một lĩnh vực từng bị ẩn nghĩa là muốn thấy nó trở lại. Không gỡ
+        ẩn thì lĩnh vực đó vừa "quan tâm" vừa "bị ẩn", và tab "Dành cho bạn" im
+        lặng không có bài nào của nó. Màn Chọn lĩnh vực vì vậy cũng là chỗ hoàn
+        tác việc ẩn lĩnh vực — thiết kế không có chỗ nào khác.
+      */
+      if (unique.length) await tx.newsArticleFeedback.deleteMany({ where: { userId, type: NewsFeedbackType.HIDE_TOPIC, topicId: { in: unique } } });
     });
     return this.profile(userId);
   }
@@ -165,12 +203,94 @@ export class NewsService {
   async feedback(userId: string, articleId: string, dto: NewsFeedbackDto) {
     const article = await this.assertArticle(articleId);
     if (dto.type === NewsFeedbackType.REPORT && !dto.reason?.trim()) throw new BadRequestException('Vui lòng nhập lý do tố cáo');
-    await this.prisma.newsArticleFeedback.upsert({
-      where: { userId_articleId_type: { userId, articleId, type: dto.type } },
-      create: { userId, articleId, type: dto.type, reason: dto.reason?.trim(), topicId: dto.type === NewsFeedbackType.HIDE_TOPIC ? article.topicId : undefined },
-      update: { reason: dto.reason?.trim(), topicId: dto.type === NewsFeedbackType.HIDE_TOPIC ? article.topicId : undefined },
+    if (dto.type === NewsFeedbackType.HIDE_TOPIC && !article.topicId) throw new BadRequestException('Bài viết chưa thuộc lĩnh vực nào');
+    if (dto.type === NewsFeedbackType.HIDE_SOURCE && !article.sourceId) throw new BadRequestException('Bài viết không có nguồn để ẩn');
+    /* Chép lĩnh vực / nguồn từ bài vào phản hồi để `hiddenFor` đọc thẳng, không join. */
+    const scope = {
+      topicId: dto.type === NewsFeedbackType.HIDE_TOPIC ? article.topicId : undefined,
+      sourceId: dto.type === NewsFeedbackType.HIDE_SOURCE ? article.sourceId : undefined,
+    };
+    await this.prisma.$transaction(async (tx) => {
+      await tx.newsArticleFeedback.upsert({
+        where: { userId_articleId_type: { userId, articleId, type: dto.type } },
+        create: { userId, articleId, type: dto.type, reason: dto.reason?.trim(), ...scope },
+        update: { reason: dto.reason?.trim(), ...scope },
+      });
+      /* Ngược với `setInterests`: đã ẩn thì không còn là lĩnh vực quan tâm. */
+      if (dto.type === NewsFeedbackType.HIDE_TOPIC) await tx.newsUserInterest.deleteMany({ where: { userId, topicId: article.topicId! } });
     });
     return { article_id: articleId, type: dto.type, received: true };
+  }
+
+  /**
+   * Hạn mức mở bản tóm tắt AI của tin tức — TÁCH RIÊNG khỏi quota chat AI
+   * (`AiService.usage`) nhưng cùng khuôn và cùng dạng dữ liệu trả về, để app
+   * hiển thị hai thứ bằng một kiểu.
+   *
+   * Tính theo THÁNG DƯƠNG LỊCH ở giờ Việt Nam, vì thiết kế ghi "còn 8/10 lượt
+   * tháng này". Mỗi Peer (NFT) đang sở hữu cộng thêm một số lượt — đó là thứ
+   * nút "Mua thêm Peer để tăng hạn mức" hứa hẹn.
+   */
+  async aiSummaryUsage(userId: string, db: UsageClient = this.prisma) {
+    const window = NewsService.monthWindow();
+    const [used, peerOwned] = await Promise.all([
+      db.newsAiSummaryUnlock.count({ where: { userId, createdAt: { gte: window.start } } }),
+      db.nftAsset.count({ where: { ownerId: userId } }),
+    ]);
+    const baseLimit = NewsService.positiveInteger(process.env.NEWS_AI_SUMMARY_MONTHLY_LIMIT, 10);
+    const perPeer = NewsService.positiveInteger(process.env.NEWS_AI_SUMMARY_LIMIT_PER_PEER, 5, true);
+    const peerBonusLimit = peerOwned * perPeer;
+    const limit = baseLimit + peerBonusLimit;
+    return {
+      used,
+      limit,
+      remaining: Math.max(0, limit - used),
+      can_use: used < limit,
+      period: 'monthly',
+      timezone: 'Asia/Ho_Chi_Minh',
+      reset_at: window.resetAt.toISOString(),
+      base_limit: baseLimit,
+      peer_owned: peerOwned,
+      peer_bonus_per_item: perPeer,
+      peer_bonus_limit: peerBonusLimit,
+    };
+  }
+
+  /**
+   * Mở bản tóm tắt AI của một bài cho một người. Bản tóm tắt có sẵn từ lúc AI
+   * biên tập bài, nên ở đây KHÔNG gọi LLM — chỉ ghi nhận một lượt.
+   *
+   * Mỗi bài chỉ trừ một lần: mở lại bài đã mở thì trả `charged: false` và
+   * không đụng tới hạn mức, kể cả khi đã hết lượt.
+   *
+   * Đếm-rồi-ghi nằm trong một transaction có khoá advisory theo người dùng:
+   * không khoá thì hai lần bấm cùng lúc ở lượt cuối đều đếm thấy "còn 1" và cả
+   * hai cùng được ghi, vượt hạn mức.
+   */
+  async unlockAiSummary(userId: string, articleId: string) {
+    const article = await this.assertArticle(articleId);
+    if (!article.aiSummary?.trim()) throw new BadRequestException('Bài viết chưa có bản tóm tắt AI');
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      /* `$executeRaw` chứ không phải `$queryRaw`: hàm này trả `void`, và Prisma không đọc được cột kiểu void. */
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}))`;
+      const existing = await tx.newsAiSummaryUnlock.findUnique({ where: { userId_articleId: { userId, articleId } } });
+      if (existing) return { charged: false, usage: await this.aiSummaryUsage(userId, tx) };
+      const usage = await this.aiSummaryUsage(userId, tx);
+      /* Có `code` để app mở trạng thái "hết lượt" thay vì toast lỗi — cùng cách với `AI_DAILY_LIMIT_REACHED`. */
+      if (!usage.can_use) {
+        throw new BadRequestException({
+          message: `Bạn đã dùng hết ${usage.limit} lượt tóm tắt AI của tháng này`,
+          code: 'NEWS_AI_SUMMARY_LIMIT_REACHED',
+          used: usage.used,
+          limit: usage.limit,
+          peer_owned: usage.peer_owned,
+          reset_at: usage.reset_at,
+        });
+      }
+      await tx.newsAiSummaryUnlock.create({ data: { userId, articleId } });
+      return { charged: true, usage: await this.aiSummaryUsage(userId, tx) };
+    });
+    return { article_id: articleId, ai_summary: article.aiSummary, ...outcome };
   }
 
   createArticle(dto: SaveNewsArticleDto) { return this.saveArticle(undefined, dto); }
@@ -190,7 +310,8 @@ export class NewsService {
       publishedAt: status === ArticleStatus.PUBLISHED ? current?.publishedAt ?? new Date() : null,
     };
     const row = id ? await this.prisma.newsArticle.update({ where: { id }, data, include: articleInclude }) : await this.prisma.newsArticle.create({ data, include: articleInclude });
-    return this.articleView(row, false);
+    /* Chỉ endpoint admin gọi tới đây, nên trả bản admin — có tóm tắt AI và nguồn gốc. */
+    return this.articleView(row, false, { admin: true });
   }
 
   createTopic(dto: SaveNewsTopicDto) { return this.prisma.newsTopic.create({ data: { name: dto.name.trim(), slug: dto.slug.trim().toLowerCase(), isActive: dto.is_active, sortOrder: dto.sort_order } }); }
@@ -204,15 +325,29 @@ export class NewsService {
     return { name: dto.name.trim(), slug: dto.slug.trim().toLowerCase(), specialty: dto.specialty.trim(), bio: dto.bio.trim(), avatarUrl: dto.avatar_url, coverUrl: dto.cover_url, initials, isVerified: dto.is_verified, isActive: dto.is_active, sortOrder: dto.sort_order };
   }
 
-  private articleView(row: Prisma.NewsArticleGetPayload<{ include: typeof articleInclude }>, isLiked: boolean, admin = false) {
+  /**
+   * `ai_summary` chỉ ra ngoài ở trang admin, hoặc ở chi tiết bài khi người
+   * đọc đã mở khoá bài đó (`revealAiSummary`). Trả cho mọi người thì hạn mức
+   * "còn 8/10 lượt" chỉ để trưng: app đã cầm sẵn bản tóm tắt trong tay.
+   * `has_ai_summary` cho app biết có nên vẽ thẻ AI hay không.
+   */
+  private articleView(
+    row: Prisma.NewsArticleGetPayload<{ include: typeof articleInclude }>,
+    isLiked: boolean,
+    { admin = false, revealAiSummary = false }: { admin?: boolean; revealAiSummary?: boolean } = {},
+  ) {
     return {
-      id: row.id, title: row.title, slug: row.slug, summary: row.summary, ai_summary: row.aiSummary, content: row.content,
+      id: row.id, title: row.title, slug: row.slug, summary: row.summary,
+      ai_summary: admin || revealAiSummary ? row.aiSummary : null,
+      has_ai_summary: Boolean(row.aiSummary?.trim()),
+      content: row.content,
       image_url: row.imageUrl, video_url: row.videoUrl, source_url: row.sourceUrl, content_type: row.contentType,
       status: row.status, published_at: row.publishedAt, created_at: row.createdAt, updated_at: row.updatedAt,
       topic: row.topic, expert: row.expert ? this.expertView(row.expert, false) : null,
+      /* Tên nguồn là dòng "CafeF · 2 giờ" ở thẻ bài. `key` và `base_url` là chuyện nội bộ của crawler. */
+      source: row.source ? { id: row.source.id, name: row.source.name, ...(admin ? { key: row.source.key, base_url: row.source.baseUrl } : {}) } : null,
       like_count: row._count.likes, is_liked: isLiked,
       ...(admin ? {
-        source: row.source ? { id: row.source.id, key: row.source.key, name: row.source.name, base_url: row.source.baseUrl } : null,
         source_title: row.sourceTitle,
         source_author: row.sourceAuthor,
         source_content: row.sourceContent,
@@ -233,9 +368,57 @@ export class NewsService {
     return { id: row.id, name: row.name, slug: row.slug, specialty: row.specialty, bio: row.bio, avatar_url: row.avatarUrl, cover_url: row.coverUrl, initials: row.initials, is_verified: row.isVerified, is_active: row.isActive, sort_order: row.sortOrder, follower_count: row._count.followers, article_count: row._count.articles, is_following: following };
   }
 
-  private async hiddenFor(userId: string) {
-    const rows = await this.prisma.newsArticleFeedback.findMany({ where: { userId, type: { in: [NewsFeedbackType.NOT_INTERESTED, NewsFeedbackType.HIDE_TOPIC] } }, select: { articleId: true, topicId: true, type: true } });
-    return { articleIds: rows.filter((row) => row.type === NewsFeedbackType.NOT_INTERESTED).map((row) => row.articleId), topicIds: rows.filter((row) => row.type === NewsFeedbackType.HIDE_TOPIC && row.topicId).map((row) => row.topicId!) };
+  private async hiddenFor(userId: string): Promise<HiddenNews> {
+    const rows = await this.prisma.newsArticleFeedback.findMany({
+      where: { userId, type: { in: [NewsFeedbackType.NOT_INTERESTED, NewsFeedbackType.HIDE_TOPIC, NewsFeedbackType.HIDE_SOURCE] } },
+      select: { articleId: true, topicId: true, sourceId: true, type: true },
+    });
+    const pick = (type: NewsFeedbackType, value: (row: (typeof rows)[number]) => string | null) =>
+      [...new Set(rows.filter((row) => row.type === type).map(value).filter((id): id is string => Boolean(id)))];
+    return {
+      articleIds: pick(NewsFeedbackType.NOT_INTERESTED, (row) => row.articleId),
+      topicIds: pick(NewsFeedbackType.HIDE_TOPIC, (row) => row.topicId),
+      sourceIds: pick(NewsFeedbackType.HIDE_SOURCE, (row) => row.sourceId),
+    };
+  }
+
+  /**
+   * Điều kiện bỏ bài người dùng đã ẩn, để đặt vào `AND` của truy vấn bài.
+   *
+   * `topicId` và `sourceId` được phép NULL, và `NOT IN` của SQL coi
+   * `NULL NOT IN (...)` là NULL — tức là LOẠI dòng đó. Viết trần
+   * `topicId: { notIn }` thì ẩn một lĩnh vực bất kỳ là mọi bài chưa có lĩnh
+   * vực biến mất theo (trên DB local: 218 bài còn 0). Nên phải mở đường cho
+   * NULL một cách tường minh.
+   */
+  private visibleFilters(hidden: HiddenNews): Prisma.NewsArticleWhereInput[] {
+    return [
+      ...(hidden.articleIds.length ? [{ id: { notIn: hidden.articleIds } }] : []),
+      ...(hidden.topicIds.length ? [{ OR: [{ topicId: null }, { topicId: { notIn: hidden.topicIds } }] }] : []),
+      ...(hidden.sourceIds.length ? [{ OR: [{ sourceId: null }, { sourceId: { notIn: hidden.sourceIds } }] }] : []),
+    ];
+  }
+
+  private async interestTopicIds(userId?: string) {
+    if (!userId) throw new UnauthorizedException('Cần đăng nhập để xem tin dành cho bạn');
+    const rows = await this.prisma.newsUserInterest.findMany({ where: { userId }, select: { topicId: true } });
+    return rows.map((row) => row.topicId);
+  }
+
+  /** Từ 00:00 ngày 1 tháng này tới 00:00 ngày 1 tháng sau, theo giờ Việt Nam. */
+  private static monthWindow(now = Date.now()) {
+    const local = new Date(now + VIETNAM_OFFSET_MS);
+    const year = local.getUTCFullYear();
+    const month = local.getUTCMonth();
+    return {
+      start: new Date(Date.UTC(year, month, 1) - VIETNAM_OFFSET_MS),
+      resetAt: new Date(Date.UTC(year, month + 1, 1) - VIETNAM_OFFSET_MS),
+    };
+  }
+
+  private static positiveInteger(value: string | undefined, fallback: number, allowZero = false) {
+    const parsed = Number(value ?? fallback);
+    return Number.isInteger(parsed) && (allowZero ? parsed >= 0 : parsed > 0) ? parsed : fallback;
   }
 
   private async likedIds(userId: string, articleIds: string[]) {
