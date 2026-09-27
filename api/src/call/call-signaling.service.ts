@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-export type CallSignalKind = 'call.invite' | 'call.accept' | 'call.reject' | 'call.cancel' | 'call.end' | 'call.missed';
+export type CallSignalKind = 'call.invite' | 'call.accept' | 'call.reject' | 'call.cancel' | 'call.end' | 'call.missed' | 'call.upgrade';
 
 @Injectable()
 export class CallSignalingService {

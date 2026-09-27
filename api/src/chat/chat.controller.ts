@@ -192,6 +192,18 @@ export class ChatController {
     return ok(data, 'Đã thu hồi tin nhắn');
   }
 
+  /**
+   * Xoá tin ở PHÍA MÌNH — ai cũng gọi được, kể cả với tin của người khác.
+   *
+   * Không đụng tới tin gốc: người gửi và các thành viên còn lại vẫn thấy.
+   * Vì thế nó là một route riêng chứ không phải một cờ của `DELETE
+   * messages/:messageId`, vốn là thu hồi và chỉ tác giả mới được.
+   */
+  @Delete('messages/:messageId/for-me')
+  hideMessage(@Req() req: AuthenticatedRequest, @Param('messageId') messageId: string) {
+    return this.chat.hideMessage(authUser(req).id, messageId).then((data) => ok(data, 'Đã xoá tin nhắn ở phía bạn'));
+  }
+
   @Post('messages/:messageId/save')
   saveMessage(@Req() req: AuthenticatedRequest, @Param('messageId') messageId: string) {
     return this.chat.saveMessage(authUser(req).id, messageId, true).then((data) => ok(data, 'Đã lưu tin nhắn'));

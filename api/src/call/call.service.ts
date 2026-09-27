@@ -64,20 +64,38 @@ export class CallService {
       for (const userId of [callerId, callee.id].sort()) {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`mindo-call:${userId}`}))`;
       }
+      /*
+        Chỉ NGƯỜI GỌI bận mới bị chặn.
+
+        Trước đây chặn cả hai phía: người nhận đang nói chuyện với ai đó thì
+        mọi cuộc gọi tới đều bị từ chối thẳng ở server, và máy họ không hề hay
+        biết có ai vừa gọi. Messenger thì để cuộc gọi thứ hai đổ chuông và cho
+        người nhận tự quyết — đó cũng là điều người dùng chờ đợi, vì họ đang
+        cầm máy trong tay.
+
+        Còn người GỌI thì vẫn chặn: đang trong một cuộc gọi mà bấm gọi người
+        khác là thao tác nhầm, không phải ý định.
+      */
       const busy = await tx.call.findFirst({
         where: {
           status: { in: ACTIVE_CALL_STATUSES },
-          OR: [
-            { callerId },
-            { calleeId: callerId },
-            { callerId: callee.id },
-            { calleeId: callee.id },
-          ],
+          OR: [{ callerId }, { calleeId: callerId }],
         },
         select: { id: true, status: true },
       });
       if (busy) {
-        throw new ConflictException({ message: 'Một trong hai người đang có cuộc gọi khác', code: 'CALL_BUSY', call_id: busy.id });
+        throw new ConflictException({ message: 'Bạn đang có cuộc gọi khác', code: 'CALL_BUSY', call_id: busy.id });
+      }
+
+      /* Người nhận đang bận thì cuộc gọi này là cuộc gọi CHỜ. Không chặn,
+         nhưng cũng không để một người bị đổ chuông dồn dập: đã có cuộc nào
+         đang đổ chuông từ chính mình tới họ thì trả lại cuộc đó. */
+      const duplicate = await tx.call.findFirst({
+        where: { callerId, calleeId: callee.id, status: CallStatus.RINGING },
+        select: { id: true },
+      });
+      if (duplicate) {
+        throw new ConflictException({ message: 'Bạn đang gọi người này', code: 'CALL_BUSY', call_id: duplicate.id });
       }
       return tx.call.create({
         data: {
@@ -149,7 +167,19 @@ export class CallService {
     const row = await this.prisma.call.findFirst({
       where: { status: { in: ACTIVE_CALL_STATUSES }, OR: [{ callerId: userId }, { calleeId: userId }] },
       include: { caller: true, callee: true },
-      orderBy: { createdAt: 'desc' },
+      /*
+        Cuộc ĐANG NÓI đứng trước cuộc đang đổ chuông.
+
+        Từ khi người nhận bận vẫn được đổ chuông, một người có thể có hai
+        cuộc cùng sống. `createdAt desc` sẽ trả cuộc chờ — nghĩa là dải băng
+        "đang trong cuộc gọi" chỉ vào nhầm cuộc, và app tưởng mình đang nói
+        chuyện với người vừa gọi tới.
+
+        `status desc` cho ACCEPTED lên trước RINGING, vì Postgres sắp enum
+        theo thứ tự KHAI BÁO và trong `schema.prisma` thì RINGING đứng trước
+        ACCEPTED.
+      */
+      orderBy: [{ status: 'desc' }, { createdAt: 'desc' }],
     });
     return row ? this.view(row, userId) : null;
   }
@@ -172,6 +202,20 @@ export class CallService {
     const current = await this.ownedCall(userId, callId);
     if (current.calleeId !== userId) throw new ForbiddenException('Bạn không phải người nhận cuộc gọi này');
     if (current.status !== CallStatus.RINGING) throw new ConflictException('Cuộc gọi không còn ở trạng thái đổ chuông');
+
+    /*
+      Nhận cuộc gọi chờ thì GÁC cuộc đang nói.
+
+      Một người chỉ ở trong một kênh RTC tại một thời điểm, nên nhận cuộc mới
+      mà để cuộc cũ nguyên đó sẽ tạo ra một cuộc gọi ma: bên kia vẫn thấy
+      "đang nói chuyện" trong khi không còn ai nghe. Gác hộ ở đây, và người
+      kia nhận `call.end` như một cuộc gọi kết thúc bình thường.
+
+      Cũng dọn luôn các cuộc ĐANG ĐỔ CHUÔNG khác tới mình: đã chọn một cuộc
+      thì những cuộc còn lại là nhỡ.
+    */
+    await this.hangUpOtherCalls(userId, callId);
+
     const media = this.agora.mediaCredentials(current.channelName, userId, client);
     const result = await this.prisma.call.updateMany({
       where: { id: callId, calleeId: userId, status: CallStatus.RINGING },
@@ -186,6 +230,80 @@ export class CallService {
       media,
       signaling: { server_delivery_enabled: this.signaling.isConfigured(), recipient_uid: row.callerId, event: 'call.accept', payload: signal },
     };
+  }
+
+  /**
+   * Kết thúc mọi cuộc gọi còn sống khác của `userId`, trừ `keepCallId`.
+   *
+   * Dùng khi người này nhận một cuộc gọi chờ. Cuộc đang nói thành
+   * `COMPLETED` (nó đã diễn ra thật), cuộc mới chỉ đổ chuông thì thành
+   * `MISSED` — không phải `REJECTED`, vì người dùng không hề từ chối ai, họ
+   * chỉ chọn một cuộc khác.
+   */
+  private async hangUpOtherCalls(userId: string, keepCallId: string) {
+    const others = await this.prisma.call.findMany({
+      where: {
+        id: { not: keepCallId },
+        status: { in: ACTIVE_CALL_STATUSES },
+        OR: [{ callerId: userId }, { calleeId: userId }],
+      },
+      include: { caller: true, callee: true },
+    });
+    const now = new Date();
+    for (const other of others) {
+      const accepted = other.status === CallStatus.ACCEPTED;
+      await this.prisma.call.updateMany({
+        where: { id: other.id, status: other.status },
+        data: {
+          status: accepted ? CallStatus.COMPLETED : CallStatus.MISSED,
+          endedAt: now,
+          endReason: accepted ? 'switched_call' : 'missed_while_busy',
+        },
+      });
+      const peerId = other.callerId === userId ? other.calleeId : other.callerId;
+      const signal = this.signalPayload(other, accepted ? 'call.end' : 'call.missed');
+      void this.signaling.publish({
+        toUserId: peerId,
+        fromUserId: userId,
+        kind: accepted ? 'call.end' : 'call.missed',
+        payload: signal,
+      });
+    }
+  }
+
+  /**
+   * Nâng một cuộc gọi thoại ĐANG NÓI lên gọi video.
+   *
+   * Không tạo cuộc gọi mới và không ai phải đổ chuông lại: hai người đã ở
+   * trong cùng một kênh Agora, bật camera chỉ là mở thêm luồng hình trên
+   * chính kênh đó. Ở đây chỉ đổi nhãn `callType`, và cả hai máy thấy nó qua
+   * nhịp poll `GET /calls/:id` rồi tự bật camera.
+   *
+   * Đổi nhãn chứ không giữ AUDIO: lịch sử phải nói đúng cái đã diễn ra ở phần
+   * lớn cuộc gọi, và chính `call_type` là thứ hai màn hình dùng để đồng bộ
+   * với nhau.
+   *
+   * AI CŨNG GỌI ĐƯỢC, không riêng người khởi xướng: trong một cuộc gọi thoại,
+   * ai muốn cho người kia nhìn thấy mình cũng là chuyện bình thường.
+   */
+  async upgradeToVideo(userId: string, callId: string) {
+    const current = await this.ownedCall(userId, callId);
+    if (current.status !== CallStatus.ACCEPTED) {
+      throw new ConflictException('Chỉ chuyển sang video khi đang trong cuộc gọi');
+    }
+    if (current.callType === CallType.VIDEO) {
+      /* Người kia vừa bấm trước — không phải lỗi, chỉ là đã xong rồi. */
+      return this.view(current, userId);
+    }
+    await this.prisma.call.updateMany({
+      where: { id: callId, status: CallStatus.ACCEPTED },
+      data: { callType: CallType.VIDEO },
+    });
+    const row = await this.ownedCall(userId, callId);
+    const peerId = row.callerId === userId ? row.calleeId : row.callerId;
+    const signal = this.signalPayload(row, 'call.upgrade');
+    void this.signaling.publish({ toUserId: peerId, fromUserId: userId, kind: 'call.upgrade', payload: signal });
+    return this.view(row, userId);
   }
 
   async reject(userId: string, callId: string) {

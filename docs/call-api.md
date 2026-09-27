@@ -65,7 +65,9 @@ Phản hồi có ba phần:
 - `media`: thông tin để join Agora RTC và đăng nhập RTM.
 - `signaling`: sự kiện mời cùng trạng thái gửi từ server.
 
-Nếu một trong hai người đang có cuộc gọi `RINGING` hoặc `ACCEPTED`, API trả HTTP `409` với mã `CALL_BUSY`.
+Chỉ NGƯỜI GỌI đang bận mới bị chặn: nếu chính người gọi đang có cuộc `RINGING` hoặc `ACCEPTED`, API trả HTTP `409` với mã `CALL_BUSY`. Gọi lại đúng người mình đang đổ chuông cũng trả `409` — cuộc cũ vẫn còn đó, tạo thêm chỉ sinh ra hai cuộc song song.
+
+Người NHẬN đang bận thì KHÔNG chặn nữa. Cuộc mới vẫn được tạo và vẫn đổ chuông, để máy người nhận hiện thanh "cuộc gọi chờ" như Messenger; họ tự chọn bắt hay bỏ. Chặn ở server thì người thứ ba chỉ nhận về một lỗi khô khan, còn người đang nói thì không bao giờ biết là có ai vừa gọi.
 
 ### Nhận hoặc từ chối
 
@@ -82,6 +84,8 @@ POST /api/v1/investor/calls/:callId/reject
 
 Chỉ người nhận mới có quyền dùng hai endpoint này. Phản hồi `accept` chứa bộ RTC token dành riêng cho người nhận.
 
+Bắt một cuộc gọi chờ thì mọi cuộc còn sống KHÁC của người bắt bị gác hộ ngay trong cùng giao dịch: cuộc đang nói thành `COMPLETED` với `end_reason=switched_call`, cuộc còn đang đổ chuông thành `MISSED` với `end_reason=missed_while_busy`. Hai bên của cuộc bị gác đều nhận `call.end`. Không gác hộ thì người ta ở lại trong hai kênh RTC một lúc và nghe cả hai bên cùng lúc.
+
 ### Kết thúc hoặc hủy cuộc gọi
 
 ```http
@@ -92,6 +96,18 @@ Content-Type: application/json
 ```
 
 Có thể gửi `reason` là `network_lost`, `peer_network_lost` hoặc `rtc_disconnect`. Endpoint này an toàn khi app gọi lặp lại do retry.
+
+### Chuyển cuộc thoại sang video
+
+```http
+POST /api/v1/investor/calls/:callId/upgrade
+```
+
+Bật hình cho một cuộc `AUDIO` đang nói. Cuộc gọi đổi `call_type` thành `VIDEO` tại chỗ — vẫn nguyên `call_id` và nguyên kênh RTC, nên không ai phải đổ chuông lại và lịch sử chỉ có MỘT dòng, ghi là cuộc gọi video.
+
+Cả hai người tham gia đều gọi được, và gọi lặp lại thì không sao (cuộc đã là `VIDEO` thì trả về nguyên trạng). Cuộc chưa `ACCEPTED`, hoặc người gọi không thuộc cuộc đó, thì bị từ chối.
+
+Người kia nhận sự kiện RTM `call.upgrade` và tự mở khung hình; ai chưa muốn bật camera của mình thì vẫn tắt được như thường.
 
 ### Làm mới media token
 
@@ -113,6 +129,8 @@ GET /api/v1/investor/calls/:callId
 ```
 
 `incoming` trả cuộc gọi đến đang đổ chuông hoặc `null`. `active` trả cuộc gọi đang đổ chuông/đã nhận gần nhất hoặc `null`.
+
+`active` xếp cuộc ĐANG NÓI (`ACCEPTED`) lên trước cuộc đang đổ chuông, rồi mới tới cuộc mới hơn. Chỉ sắp theo thời gian thì lúc đang nói mà có người khác gọi tới, app mở lại sẽ nhảy vào cuộc gọi đến — bỏ rơi cuộc đang dở.
 
 ### Lịch sử
 
@@ -140,6 +158,7 @@ Các sự kiện:
 - `call.cancel`: người gọi hủy trước khi bắt máy.
 - `call.end`: cuộc gọi đã kết thúc.
 - `call.missed`: hết thời gian đổ chuông.
+- `call.upgrade`: cuộc thoại vừa được bật hình; payload mang `call_type: "VIDEO"`.
 
 ## Lưu ý mobile
 

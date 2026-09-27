@@ -169,6 +169,9 @@ export class ChatService {
     const rows = await this.prisma.chatMessage.findMany({
       where: {
         conversationId,
+        /* Tin người này đã ẩn ở phía mình thì không trả về nữa — xem
+           `hideMessage`. Người khác vẫn nhận bình thường. */
+        hiddenBy: { none: { userId } },
         AND: [
           { createdAt: { gte: member.joinedAt } },
           ...(cursor ? [{ OR: [
@@ -275,6 +278,31 @@ export class ChatService {
       data: { deletedAt, content: null, attachments: Prisma.JsonNull },
     });
     return { message_id: row.id, conversation_id: row.conversationId, deleted_at: deletedAt.toISOString() };
+  }
+
+  /**
+   * Ẩn một tin ở PHÍA MÌNH.
+   *
+   * Khác `deleteMessage` ở hai điểm, và cả hai đều cố ý:
+   *
+   *   - không đòi quyền tác giả, chỉ đòi là thành viên hội thoại — đây là
+   *     chuyện riêng của người xem, không đụng gì tới tin gốc;
+   *   - không sửa `ChatMessage`. Người gửi và các thành viên khác vẫn thấy
+   *     tin nguyên vẹn, nên không có gì để phát qua socket.
+   *
+   * `upsert` để ẩn hai lần cũng không sao — người dùng bấm lại trên máy khác
+   * thì không có lý do gì để báo lỗi.
+   */
+  async hideMessage(userId: string, messageId: string) {
+    const message = await this.prisma.chatMessage.findUnique({ where: { id: messageId } });
+    if (!message) throw new NotFoundException('Không tìm thấy tin nhắn');
+    await this.assertMembership(userId, message.conversationId);
+    await this.prisma.hiddenChatMessage.upsert({
+      where: { userId_messageId: { userId, messageId } },
+      update: {},
+      create: { userId, messageId },
+    });
+    return { message_id: messageId, conversation_id: message.conversationId, hidden: true };
   }
 
   async saveMessage(userId: string, messageId: string, saved: boolean) {

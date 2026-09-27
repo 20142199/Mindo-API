@@ -223,6 +223,7 @@ model User {
   createdConversations         Conversation[]         @relation("ConversationCreator")
   sentChatMessages             ChatMessage[]
   savedChatMessages            SavedChatMessage[]
+  hiddenChatMessages HiddenChatMessage[]
 }
 
 model FriendRequest {
@@ -309,9 +310,26 @@ model ChatMessage {
   @@index([conversationId, createdAt, id])
   @@index([senderId, createdAt])
   @@index([replyToId])
+  hiddenBy      HiddenChatMessage[]
 }
 
 model SavedChatMessage {
+  userId    String
+  messageId String
+  createdAt DateTime    @default(now())
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@id([userId, messageId])
+  @@index([userId, createdAt])
+}
+
+/// Tin bị ẩn ở phía MỘT người.
+///
+/// Khác `ChatMessage.deletedAt` (thu hồi, ai cũng mất): hàng này chỉ nói
+/// "người `userId` không muốn thấy tin `messageId` nữa". Người gửi và mọi
+/// thành viên khác vẫn thấy nguyên.
+model HiddenChatMessage {
   userId    String
   messageId String
   createdAt DateTime    @default(now())
