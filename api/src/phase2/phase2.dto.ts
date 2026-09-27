@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import { AgencyStatus, AiMessageKind, UserRole } from '@prisma/client';
-import { IsArray, IsBoolean, IsEmail, IsEnum, IsHexColor, IsInt, IsNumber, IsOptional, IsString, IsUrl, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsEmail, IsEnum, IsHexColor, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUrl, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { AI_ASPECT_RATIOS, AI_IMAGE_STYLES, AiAspectRatio, AiImageStyle } from './ai-image.options';
 
 export class CreateAgencyApplicationDto {
   @IsString() @MinLength(2) business_name!: string;
@@ -85,6 +86,9 @@ export class CreateAiMessageDto {
   @IsOptional() @IsString() @MaxLength(20) source_language?: string;
   @IsOptional() @IsString() @MaxLength(20) target_language?: string;
   @IsOptional() @IsString() attachment_file_id?: string;
+  /* Chỉ có nghĩa khi `kind = IMAGE`; loại khác thì AiService bỏ qua */
+  @IsOptional() @IsIn(AI_IMAGE_STYLES) image_style?: AiImageStyle;
+  @IsOptional() @IsIn(AI_ASPECT_RATIOS) aspect_ratio?: AiAspectRatio;
 }
 
 export class UpsertAiExpertDto {

@@ -103,6 +103,93 @@ describe('AiProviderService', () => {
     expect(result.metadata).toMatchObject({ vendor: 'gemini', model: 'gemini-image-test', input_tokens: 2, output_tokens: 4 });
   });
 
+  /*
+    Tạo ảnh không còn đóng cứng vào Gemini. Lý do rất cụ thể: key Gemini hiện
+    tại gọi model chat thì 200, gọi model ảnh thì 429 với `limit: 0` — bậc
+    miễn phí KHÔNG cấp suất tạo ảnh, đợi sang ngày cũng vẫn 0. Phải bật thanh
+    toán mới dùng được, mà lúc này chưa có.
+
+    Nên `IMAGE_VENDOR` tách riêng khỏi `LLM_PRIMARY_VENDOR`: chữ và ảnh không
+    nhất thiết mua của cùng một nhà. Mặc định vẫn là gemini để không đổi hành
+    vi sau lưng ai; muốn khác thì phải khai báo.
+  */
+  it('mặc định vẫn tạo ảnh bằng Gemini khi không khai IMAGE_VENDOR', async () => {
+    process.env.AI_MOCK = 'false';
+    process.env.GEMINI_API_KEY = 'gemini-key';
+    delete process.env.IMAGE_VENDOR;
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'aW1hZ2U=' } }] } }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'nhà xanh');
+
+    expect(result.metadata).toMatchObject({ vendor: 'gemini' });
+    expect(String(fetchMock.mock.calls[0][0])).toContain('generativelanguage');
+  });
+
+  it('IMAGE_VENDOR=pollinations thì gọi Pollinations và KHÔNG cần API key', async () => {
+    /* Nhà duy nhất chạy được ngay khi chưa ai cấp key — dùng để thông luồng */
+    process.env.AI_MOCK = 'false';
+    delete process.env.GEMINI_API_KEY;
+    process.env.IMAGE_VENDOR = 'pollinations';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? 'image/jpeg' : null) },
+      arrayBuffer: async () => new TextEncoder().encode('anh-gia').buffer,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'mèo đen đội mũ');
+
+    expect(result.attachmentData?.content.toString()).toBe('anh-gia');
+    expect(result.attachmentData?.mimeType).toBe('image/jpeg');
+    expect(result.metadata).toMatchObject({ vendor: 'pollinations' });
+    const [url, init] = fetchMock.mock.calls[0] as [string, { method?: string; headers?: Record<string, string> }];
+    expect(url).toContain('image.pollinations.ai/prompt/');
+    /* GET, không phải POST-JSON như các nhà kia */
+    expect(init?.method ?? 'GET').toBe('GET');
+    /* Không được gắn Authorization: không có key nào để gắn, gắn bừa là 401 */
+    expect(JSON.stringify(init?.headers ?? {})).not.toContain('Authorization');
+  });
+
+  it('mô tả ảnh được escape vào đường dẫn, không vỡ URL', async () => {
+    /*
+      Pollinations nhận mô tả NẰM TRONG path chứ không phải query. Dấu cách,
+      dấu tiếng Việt, dấu `/` và `?` của người dùng mà không escape thì hoặc
+      gãy URL hoặc lạc sang endpoint khác.
+    */
+    process.env.AI_MOCK = 'false';
+    process.env.IMAGE_VENDOR = 'pollinations';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => 'image/jpeg' },
+      arrayBuffer: async () => new TextEncoder().encode('x').buffer,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'mèo/chó? đội mũ');
+
+    const url = String(fetchMock.mock.calls[0][0]);
+    expect(url).toContain(encodeURIComponent('mèo/chó? đội mũ'));
+    /* phần sau `?` phải là tham số của mình, không phải mẩu câu hỏi lọt ra */
+    expect(url.split('?')[1] ?? '').not.toContain('đội');
+  });
+
+  it('Pollinations hỏng thì báo lỗi có mã riêng, không đội lốt Gemini', async () => {
+    process.env.AI_MOCK = 'false';
+    process.env.IMAGE_VENDOR = 'pollinations';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 502, headers: { get: () => null } }));
+
+    await expect(
+      new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'mèo'),
+    ).rejects.toMatchObject({ response: { code: 'POLLINATIONS_IMAGE_FAILED' } });
+  });
+
   it('adds translation instructions to Gemini systemInstruction', async () => {
     process.env.AI_MOCK = 'false';
     process.env.GEMINI_API_KEY = 'gemini-key';
@@ -155,5 +242,117 @@ describe('AiProviderService', () => {
     expect(deltas).toEqual(['Xin ', 'Xin chào']);
     expect(result.content).toBe('Xin chào');
     expect(result.metadata).toMatchObject({ total_tokens: 4 });
+  });
+  it('Pollinations: tỷ lệ 9:16 ra width/height dọc, phong cách nối vào mô tả', async () => {
+    process.env.AI_MOCK = 'false';
+    process.env.IMAGE_VENDOR = 'pollinations';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      headers: { get: () => 'image/jpeg' },
+      arrayBuffer: async () => new TextEncoder().encode('x').buffer,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'robot', {
+      imageStyle: 'THREE_D', aspectRatio: '9:16',
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.searchParams.get('width')).toBe('768');
+    expect(url.searchParams.get('height')).toBe('1344');
+    expect(decodeURIComponent(url.pathname)).toContain('3D render');
+    expect(result.metadata).toMatchObject({ width: 768, height: 1344 });
+  });
+
+  it('Pollinations: không truyền tuỳ chọn thì vuông 1024 và giữ nguyên mô tả', async () => {
+    process.env.AI_MOCK = 'false';
+    process.env.IMAGE_VENDOR = 'pollinations';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      headers: { get: () => 'image/jpeg' },
+      arrayBuffer: async () => new TextEncoder().encode('x').buffer,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'robot');
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.searchParams.get('width')).toBe('1024');
+    expect(url.searchParams.get('height')).toBe('1024');
+    expect(decodeURIComponent(url.pathname)).toBe('/prompt/robot');
+  });
+
+  it('Gemini: tỷ lệ đi vào generationConfig.imageConfig.aspectRatio', async () => {
+    process.env.AI_MOCK = 'false';
+    process.env.GEMINI_API_KEY = 'gemini-key';
+    delete process.env.IMAGE_VENDOR;
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'aW1hZ2U=' } }] } }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'robot', { aspectRatio: '4:3' });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.generationConfig.imageConfig).toEqual({ aspectRatio: '4:3' });
+  });
+  it('Pollinations: mỗi lần gọi một seed ngẫu nhiên — "Tạo lại" phải ra ảnh KHÁC', async () => {
+    /*
+      Pollinations trả kết quả cố định theo (mô tả, tham số). Không có seed thì
+      bấm "Tạo lại" nhận về đúng tấm cũ từng byte — đo trên máy ngày 28/09/2026:
+      hai lần tạo cùng md5, cùng 25.930 byte.
+    */
+    process.env.AI_MOCK = 'false';
+    process.env.IMAGE_VENDOR = 'pollinations';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      headers: { get: () => 'image/jpeg' },
+      arrayBuffer: async () => new TextEncoder().encode('x').buffer,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const service = new AiProviderService();
+
+    const first = await service.generate(expert, AiMessageKind.IMAGE, 'robot');
+    const second = await service.generate(expert, AiMessageKind.IMAGE, 'robot');
+
+    const seedOf = (call: number) => new URL(String(fetchMock.mock.calls[call][0])).searchParams.get('seed');
+    expect(seedOf(0)).toMatch(/^\d+$/);
+    expect(seedOf(0)).not.toBe(seedOf(1));
+    /* ghi lại để lần sau muốn tái hiện đúng tấm đó thì còn có số */
+    expect(first.metadata?.seed).toBe(Number(seedOf(0)));
+    expect(second.metadata?.seed).toBe(Number(seedOf(1)));
+  });
+
+  describe('summarizeTitle', () => {
+    it('lấy tiêu đề từ model chữ và dọn ngoặc, dấu chấm', async () => {
+      process.env.AI_MOCK = 'false';
+      process.env.GEMINI_API_KEY = 'gemini-key';
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true, status: 200,
+        json: async () => ({ candidates: [{ content: { parts: [{ text: '"Robot Mindo 3D".' }] } }] }),
+      }));
+
+      await expect(new AiProviderService().summarizeTitle('Tạo robot trợ lý 3D thân thiện')).resolves.toBe('Robot Mindo 3D');
+    });
+
+    it('cả hai nhà đều hỏng thì trả null, KHÔNG ném', async () => {
+      /* Tiêu đề là bước phụ — ném ra ở đây là đánh sập cả tấm ảnh đã tạo xong */
+      process.env.AI_MOCK = 'false';
+      process.env.GEMINI_API_KEY = 'gemini-key';
+      process.env.DEEPSEEK_API_KEY = 'ds-key';
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+
+      await expect(new AiProviderService().summarizeTitle('mèo')).resolves.toBeNull();
+    });
+
+    it('chế độ mock không gọi mạng', async () => {
+      delete process.env.AI_MOCK;
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+
+      await expect(new AiProviderService().summarizeTitle('mèo')).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 });

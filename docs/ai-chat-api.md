@@ -32,6 +32,19 @@ Các endpoint dưới đây phục vụ màn AI Chat/AI Studio trong thiết k�
 
 `kind` nhận `CHAT`, `IMAGE`, `DOCUMENT`, `TRANSLATION`. `source_language` và `target_language` dùng cho dịch thuật; API cũng chấp nhận nhãn ngôn ngữ do endpoint config trả về. Bản dịch tối đa 1.000 ký tự.
 
+### Tuỳ chọn tạo ảnh
+
+Chỉ có nghĩa khi `kind = IMAGE`; với loại khác server bỏ qua.
+
+| Trường | Giá trị |
+|---|---|
+| `image_style` | `AUTO` (mặc định) · `NATURAL` · `THREE_D` · `ILLUSTRATION` |
+| `aspect_ratio` | `1:1` (mặc định) · `4:3` · `9:16` |
+
+Giá trị ngoài danh sách trả `400`. Hai giá trị được lưu ở `metadata.imageStyle` / `metadata.aspectRatio` của tin trả lời, nên `/retry` chạy lại đúng cài đặt cũ và app mở lại phiên vẫn biết vẽ khung theo tỷ lệ nào. Phong cách được server ghép vào mô tả trước khi gửi cho nhà cung cấp.
+
+Ảnh đầu tiên của phiên: server tóm mô tả thành tiêu đề 2–5 chữ và ghi vào `title` của hội thoại, trước khi tin chuyển `COMPLETED` — khung SSE cuối đã mang tiêu đề mới. Không đè tên người dùng tự đặt. Đặt tên hỏng không làm hỏng ảnh; tiêu đề giữ nguyên là mô tả cắt ngắn.
+
 File được tải trước qua `POST /api/v1/investor/files/upload` (multipart field `file`). Chat hỗ trợ JPG, PNG, WebP và PDF riêng tư, tối đa 10 MB. API chỉ cho AI đọc file thuộc đúng người đang đăng nhập. Tin nhắn trả về có trường `attachment` gồm tên, MIME, dung lượng và URL có chữ ký ngắn hạn.
 
 Kết quả tạo ngay hai bản ghi:
@@ -64,6 +77,8 @@ GEMINI_API_KEY=
 GEMINI_NATIVE_BASE_URL=https://generativelanguage.googleapis.com/v1beta
 GEMINI_MODEL=gemini-3.5-flash-lite
 GEMINI_IMAGE_MODEL=gemini-3.1-flash-lite-image
+# Nhà tạo ảnh: gemini (mặc định, cần bật thanh toán) | pollinations (không cần key, chỉ để thử)
+IMAGE_VENDOR=gemini
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat

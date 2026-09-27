@@ -1,5 +1,7 @@
+import { randomInt } from 'node:crypto';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { AiExpert, AiMessageKind } from '@prisma/client';
+import { AiAspectRatio, AiImageStyle, aspectRatioOf, imageDimensions, imageStyleOf, sanitizeTitle, styledPrompt } from './ai-image.options';
 
 export type AiContextMessage = { role: 'user' | 'assistant'; content: string };
 export type AiInputFile = { name: string; mimeType: string; content: Buffer };
@@ -10,8 +12,13 @@ export type AiGenerateOptions = {
   attachment?: AiInputFile;
   signal?: AbortSignal;
   onDelta?: (content: string) => Promise<void>;
+  /* Chỉ dùng cho IMAGE — xem ai-image.options.ts */
+  imageStyle?: AiImageStyle;
+  aspectRatio?: AiAspectRatio;
 };
-type AiVendor = 'gemini' | 'deepseek';
+type AiVendor = 'gemini' | 'deepseek' | 'pollinations';
+/* Nhà cung cấp ảnh — tách khỏi `AiVendor` vì không phải nhà nào cũng làm chữ */
+type ImageVendor = 'gemini' | 'pollinations';
 type TokenUsage = { inputTokens: number; outputTokens: number; totalTokens: number };
 type AiResult = {
   content: string;
@@ -33,7 +40,7 @@ export class AiProviderService {
       if (kind !== AiMessageKind.IMAGE) await options.onDelta?.(result.content);
       return result;
     }
-    if (kind === AiMessageKind.IMAGE) return this.generateGeminiImage(input, startedAt, options.signal);
+    if (kind === AiMessageKind.IMAGE) return this.generateImage(input, startedAt, options);
 
     const taskInstruction = kind === AiMessageKind.TRANSLATION
       ? `Dịch nội dung từ ${options.sourceLanguage ?? 'ngôn ngữ tự động nhận diện'} sang ${options.targetLanguage ?? 'Tiếng Việt'}. Chỉ trả về bản dịch.`
@@ -84,6 +91,30 @@ export class AiProviderService {
       last_vendor: lastError?.vendor,
       provider_status: lastError?.status,
     });
+  }
+
+  /**
+   * Tóm mô tả ảnh thành tiêu đề 2–5 chữ.
+   *
+   * Không bao giờ ném: mọi đường hỏng trả `null`, người gọi lùi về mô tả cắt
+   * ngắn đang có. Đi đúng thứ tự nhà cung cấp chữ như `generate`.
+   */
+  async summarizeTitle(prompt: string, signal?: AbortSignal): Promise<string | null> {
+    if (process.env.AI_MOCK !== 'false') return null;
+    const systemPrompt = 'Đặt tiêu đề ngắn từ 2 đến 5 chữ cho bức ảnh được mô tả. Giữ ngôn ngữ của mô tả. Chỉ trả về tiêu đề, không ngoặc kép, không dấu chấm.';
+    const primary = this.vendor(process.env.LLM_PRIMARY_VENDOR, 'gemini');
+    const fallback = this.vendor(process.env.LLM_FALLBACK_VENDOR, 'deepseek');
+    for (const vendor of [...new Set<AiVendor>([primary, fallback])]) {
+      try {
+        const result = vendor === 'gemini'
+          ? await this.completeGemini(systemPrompt, prompt, { signal })
+          : await this.completeDeepSeek(systemPrompt, prompt, { signal });
+        return sanitizeTitle(result.content);
+      } catch {
+        if (signal?.aborted) return null;
+      }
+    }
+    return null;
   }
 
   private async completeGemini(systemPrompt: string, input: string, options: AiGenerateOptions): Promise<ProviderTextResult> {
@@ -171,7 +202,94 @@ export class AiProviderService {
     };
   }
 
-  private async generateGeminiImage(input: string, startedAt: number, signal?: AbortSignal): Promise<AiResult> {
+  /**
+   * Chọn nhà tạo ảnh.
+   *
+   * Tách hẳn khỏi `LLM_PRIMARY_VENDOR` vì chữ và ảnh không nhất thiết mua của
+   * cùng một nhà — và thực tế đang đúng như vậy: key Gemini hiện tại gọi model
+   * chat thì 200, gọi model ảnh thì 429 kèm `limit: 0`, tức bậc miễn phí không
+   * cấp suất tạo ảnh nào. Ép hai thứ đi chung một biến thì muốn đổi ảnh phải
+   * hi sinh cả phần chữ đang chạy tốt.
+   *
+   * Mặc định vẫn là `gemini`: đổi hành vi sau lưng người đang chạy là cách
+   * nhanh nhất để một môi trường im lặng dùng nhà khác mà không ai hay.
+   */
+  private imageVendor(): ImageVendor {
+    return process.env.IMAGE_VENDOR?.trim().toLowerCase() === 'pollinations' ? 'pollinations' : 'gemini';
+  }
+
+  private generateImage(input: string, startedAt: number, options: AiGenerateOptions): Promise<AiResult> {
+    const ratio = aspectRatioOf(options.aspectRatio);
+    /* Phong cách ghép vào mô tả ở ĐÂY, một chỗ cho mọi nhà cung cấp */
+    const prompt = styledPrompt(input, imageStyleOf(options.imageStyle));
+    return this.imageVendor() === 'pollinations'
+      ? this.generatePollinationsImage(prompt, ratio, startedAt, options.signal)
+      : this.generateGeminiImage(prompt, ratio, startedAt, options.signal);
+  }
+
+  /**
+   * Tạo ảnh qua Pollinations — nhà DUY NHẤT không cần API key.
+   *
+   * Có mặt ở đây để luồng tạo ảnh chạy được từ app xuống tận nơi trong lúc
+   * chưa ai cấp key. Đừng nhầm nó là lựa chọn cho bản chạy thật: đây là dịch
+   * vụ công cộng miễn phí, không cam kết tốc độ cũng không cam kết còn sống.
+   *
+   * Khác mọi nhà còn lại ở hai điểm, nên không dùng lại `request()` được:
+   * GET chứ không POST-JSON, và trả về THẲNG byte ảnh chứ không phải JSON.
+   *
+   * Mô tả nằm trong PATH chứ không phải query, nên bắt buộc
+   * `encodeURIComponent`: một dấu `?` người dùng gõ mà không escape là toàn bộ
+   * phần sau bị đọc thành tham số.
+   */
+  private async generatePollinationsImage(input: string, ratio: AiAspectRatio, startedAt: number, signal?: AbortSignal): Promise<AiResult> {
+    const vendor: AiVendor = 'pollinations';
+    const { width, height } = imageDimensions(ratio);
+    /* Không có seed thì Pollinations trả đúng tấm cũ cho cùng mô tả — "Tạo lại" vô nghĩa */
+    const seed = randomInt(1, 2_147_483_647);
+    const baseUrl = (process.env.POLLINATIONS_BASE_URL ?? 'https://image.pollinations.ai').replace(/\/+$/, '');
+    const model = process.env.POLLINATIONS_MODEL ?? 'flux';
+    const url = `${baseUrl}/prompt/${encodeURIComponent(input)}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=${encodeURIComponent(model)}`;
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS ?? 60_000))])
+          : AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS ?? 60_000)),
+      });
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      throw new ServiceUnavailableException({ message: 'Chưa tạo được ảnh', code: 'POLLINATIONS_IMAGE_FAILED', provider_status: null });
+    }
+    if (!response.ok) {
+      throw new ServiceUnavailableException({ message: 'Chưa tạo được ảnh', code: 'POLLINATIONS_IMAGE_FAILED', provider_status: response.status });
+    }
+
+    const mimeType = response.headers.get('content-type')?.split(';')[0]?.trim() || 'image/jpeg';
+    const content = Buffer.from(await response.arrayBuffer());
+    /* Thân rỗng vẫn là 200 bên Pollinations lúc quá tải — bắt ở đây, kẻo tin
+       nhắn về tới app mang một tệp 0 byte và không ai biết vì sao */
+    if (!content.length) {
+      throw new ServiceUnavailableException({ message: 'Chưa tạo được ảnh', code: 'POLLINATIONS_IMAGE_EMPTY' });
+    }
+
+    return {
+      content: 'Ảnh đã được tạo theo yêu cầu.',
+      attachmentData: { content, mimeType, filename: `mindo-ai-${Date.now()}.${this.imageExtension(mimeType)}` },
+      metadata: {
+        vendor,
+        model,
+        credits: 1,
+        width,
+        height,
+        seed,
+        latency_ms: Date.now() - startedAt,
+      },
+    };
+  }
+
+  private async generateGeminiImage(input: string, ratio: AiAspectRatio, startedAt: number, signal?: AbortSignal): Promise<AiResult> {
     const vendor: AiVendor = 'gemini';
     const apiKey = process.env.GEMINI_API_KEY?.trim();
     if (!apiKey) throw new ServiceUnavailableException({ message: 'Chưa cấu hình Gemini để tạo ảnh', code: 'GEMINI_NOT_CONFIGURED' });
@@ -184,7 +302,7 @@ export class AiProviderService {
         'x-goog-api-key': apiKey,
       }, {
         contents: [{ role: 'user', parts: [{ text: input }] }],
-        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+        generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: ratio } },
       }, signal);
     } catch (error) {
       const status = error instanceof VendorError ? error.status : null;
@@ -212,8 +330,7 @@ export class AiProviderService {
         vendor,
         model,
         credits: 1,
-        width: 1024,
-        height: 1024,
+        ...imageDimensions(ratio),
         input_tokens: inputTokens,
         output_tokens: outputTokens,
         total_tokens: data.usageMetadata?.totalTokenCount ?? inputTokens + outputTokens,
