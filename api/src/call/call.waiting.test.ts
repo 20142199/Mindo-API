@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AgoraService } from './agora.service';
 import { CallSignalingService } from './call-signaling.service';
 import { CallService } from './call.service';
+import { CallChatLogService } from './call-chat-log.service';
 import { CallClient } from './call.dto';
 import { PrismaService } from '../common/prisma.module';
 import { FileStorageService } from '../phase1/file-storage.service';
@@ -96,6 +97,10 @@ function build(options: {
     { isConfigured: () => false, publish: () => Promise.resolve(false) } as unknown as CallSignalingService,
     {} as FileStorageService,
     { notifyIncomingCall: vi.fn(() => Promise.resolve()) } as unknown as PushNotificationService,
+    /* Nhật ký cuộc gọi trong chat — thêm sau bộ test này. Nó chạy ngoài
+       luồng (`void`) và không nằm trong đường đi nào ở đây, nên chỉ cần một
+       bản rỗng để dựng được. */
+    { record: vi.fn(() => Promise.resolve()) } as unknown as CallChatLogService,
     { add: vi.fn(() => Promise.resolve({ id: 'job' })) } as unknown as Queue<{ callId: string }>,
   );
   return { service, updateMany };

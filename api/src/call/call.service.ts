@@ -15,6 +15,7 @@ import { PrismaService } from '../common/prisma.module';
 import { PushNotificationService } from '../notification/push-notification.service';
 import { FileStorageService } from '../phase1/file-storage.service';
 import { AgoraService } from './agora.service';
+import { CallChatLogService } from './call-chat-log.service';
 import { CALL_TIMEOUT_QUEUE } from './call.constants';
 import { CallClient, CallDirection, CallEndReason, CallHistoryQueryDto, InitiateCallDto } from './call.dto';
 import {
@@ -41,6 +42,9 @@ export class CallService {
     private readonly signaling: CallSignalingService,
     private readonly files: FileStorageService,
     private readonly push: PushNotificationService,
+    /* Ghi nhật ký cuộc gọi vào chính hội thoại — xem `CallChatLogService`.
+       Luôn gọi bằng `void`: nhật ký hỏng không được chặn việc cúp máy. */
+    private readonly chatLog: CallChatLogService,
     @InjectQueue(CALL_TIMEOUT_QUEUE) private readonly timeoutQueue: Queue<{ callId: string }>,
   ) {}
 
@@ -318,6 +322,7 @@ export class CallService {
     const row = await this.ownedCall(userId, callId);
     const signal = this.signalPayload(row, 'call.reject');
     void this.signaling.publish({ toUserId: row.callerId, fromUserId: userId, kind: 'call.reject', payload: signal });
+    void this.chatLog.record(row);
     return this.view(row, userId);
   }
 
@@ -354,6 +359,7 @@ export class CallService {
     if (result.count === 1) {
       const otherUserId = row.callerId === userId ? row.calleeId : row.callerId;
       void this.signaling.publish({ toUserId: otherUserId, fromUserId: userId, kind: signalKind, payload: this.signalPayload(row, signalKind) });
+      void this.chatLog.record(row);
     }
     return this.view(row, userId);
   }
@@ -399,6 +405,7 @@ export class CallService {
       this.signaling.publish({ toUserId: row.callerId, fromUserId: row.calleeId, kind: 'call.missed', payload }),
       this.signaling.publish({ toUserId: row.calleeId, fromUserId: row.callerId, kind: 'call.missed', payload }),
     ]);
+    void this.chatLog.record(row);
     return { expired: true };
   }
 

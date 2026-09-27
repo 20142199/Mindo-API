@@ -1,0 +1,17 @@
+-- Ảnh RIÊNG mình gán cho một người bạn — Figma 978:5979 / 978:6011.
+--
+-- Song song với `alias`, và cùng một lý do: `User.avatarFileId` là ảnh CHỦ
+-- TÀI KHOẢN tự đặt, mình không đặt hộ được. Nhưng "trong danh bạ của tôi,
+-- người này trông như thế này" thì lại là chuyện của riêng tôi — hệt như
+-- "trong danh bạ của tôi, người này tên là Sếp".
+--
+-- Một chiều: A gán ảnh cho B thì B không hề biết, và hàng B→A vẫn trống.
+--
+-- Nullable: chưa gán thì null, app rơi về ảnh hồ sơ của họ rồi mới tới chữ
+-- cái đầu. "Xoá ảnh hiện tại" trong sheet 978:6072 cũng là ghi null chứ
+-- không phải chuỗi rỗng.
+--
+-- KHÔNG khoá ngoại tới "FileUpload": bảng đó có dọn dẹp riêng, và một liên
+-- hệ mất ảnh thì rơi về ảnh hồ sơ chứ không được kéo đổ cả hàng bạn bè.
+-- Cột `Conversation.avatarFileId` cũng đang theo đúng cách này.
+ALTER TABLE "Friendship" ADD COLUMN "avatarFileId" TEXT;

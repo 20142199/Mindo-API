@@ -41,7 +41,14 @@ function buildService(memberIds: string[]) {
     assertMembership: vi.fn().mockResolvedValue(undefined),
     getMemberUserIds: vi.fn().mockResolvedValue(memberIds),
   };
-  const presence = { connect: vi.fn(), disconnect: vi.fn() };
+  /* `vi.fn()` trần trả về `undefined`, mà `bindSocket` nay `await` rồi `.catch`
+     kết quả của `connect` — stub rỗng làm mỗi lần nối socket ném ra một lời hứa
+     bị từ chối mà không ai bắt. Ca test vẫn xanh vì lỗi rơi ngoài luồng, nhưng
+     vitest đếm nó vào "unhandled errors". Trả đúng hình dạng thật là hết. */
+  const presence = {
+    connect: vi.fn(() => Promise.resolve(false)),
+    disconnect: vi.fn(() => Promise.resolve({ wasLast: false, lastSeenAt: null })),
+  };
   const service = new ChatRealtimeService(
     {} as JwtService,
     {} as PrismaService,

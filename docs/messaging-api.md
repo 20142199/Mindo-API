@@ -22,7 +22,14 @@ Server phát:
 
 - `message:new`, `message:updated`, `message:deleted`, `message:read`
 - `typing:peer`
+- `presence:updated`: `{ user_id, is_online, last_seen_at }`
 - `conversation:updated`, `conversation:removed`, `conversation:deleted`
+
+`presence:updated` bắn vào `user:{id}` của MỌI người có chung ít nhất một hội thoại chưa xoá với người vừa đổi trạng thái. Chỉ bắn ở socket ĐẦU TIÊN khi vào mạng và socket CUỐI CÙNG khi rời — mở thêm thiết bị thứ hai không sinh sự kiện, và đóng một trong hai thiết bị cũng vậy. `last_seen_at` chỉ có giá trị ở gói `is_online: false`; nó được ghi vào `User.lastSeenAt` cùng lúc.
+
+Nhóm KHÔNG có trạng thái hoạt động: `is_online` luôn `false` và `last_seen_at` luôn `null` trên dòng `GROUP`.
+
+Tập socket đang mở nằm ở Redis (`mindo:chat:online:{userId}`), mỗi thành viên ghi dạng `{nodeId}|{socketId}`. Mỗi tiến trình server giữ một khoá nhịp tim `mindo:chat:node:{nodeId}` TTL 60s; lúc khởi động nó quét bỏ socket của những tiến trình không còn khoá đó. Không có bước quét này thì một lần server chết là đủ làm hỏng hẳn presence của những người đang kết nối lúc đó — tập của họ không bao giờ còn về 0 nên không ai được báo là họ đã offline. Hệ quả kèm theo: **mỗi lần triển khai, presence của mọi người reset**, và chấm sáng lại khi máy họ nối lại.
 
 `clientMessageId` phải là UUID v4. Khi app retry cùng ID, server trả `status: duplicate` và không tạo bản ghi thứ hai.
 
@@ -36,9 +43,49 @@ Tin hệ thống (tạo nhóm, thêm/xóa thành viên) cũng được phát qua
 
 Tất cả route dưới đây cần Bearer access token và có prefix `/api/v1/investor/chat`.
 
+### Nhật ký cuộc gọi trong hội thoại
+
+Mỗi cuộc gọi kết thúc (`COMPLETED`, `MISSED`, `REJECTED`, `CANCELLED`) sinh MỘT tin `SYSTEM` trong hội thoại 1-1 giữa hai người, và `conversation:updated` được phát ngay cho cả hai.
+
+Tin mang `call_info`: `{ call_id, call_type, status, duration_sec, caller_user_id }`. `content` đã có sẵn câu chữ nên bản app cũ đọc được ngay; bản mới dùng `call_info` để vẽ icon, tô đỏ cuộc nhỡ và cho gọi lại.
+
+CHIỀU GỌI do app tự suy từ `caller_user_id`, không ghi sẵn vào `content`: một tin hệ thống hiện giống nhau cho cả hai phía, nên "Bạn đã gọi" thì đúng với một người và sai với người kia. Cùng lý do đó, "không bắt máy" hiện là *Không trả lời* ở phía người gọi và *Cuộc gọi nhỡ* ở phía người nhận.
+
+Hai người chưa từng nhắn thì hội thoại được TẠO. Gọi cho ai đó rồi mở Tin nhắn không thấy gì là mất dấu cuộc gọi.
+
+Ghi nhật ký chạy ngoài luồng và không bao giờ ném: hỏng thì mất một dòng trong chat, còn ném thì người dùng không cúp máy được — nó chạy sau khi trạng thái đã vào CSDL.
+
+### Thẻ xem trước link
+
+```http
+GET /api/v1/investor/chat/link-preview?url=https://mindo.vn/tin/abc
+```
+
+Trả `{ url, title, description, image, site_name }`, hoặc `data: null` khi không đọc được. **Luôn 200** — link chết hay trang chặn bot là chuyện thường ngày, không phải lỗi của người dùng.
+
+App gọi lúc SOẠN rồi gửi lại nguyên văn qua `link_preview` của `message:send`; server lưu vào `ChatMessage.linkPreview` và trả lại trong mọi payload tin nhắn. Nhờ vậy mỗi link chỉ tải một lần, ai xem cũng thấy giống nhau, và **IP người nhận không bị lộ cho trang đích**. Tin bị thu hồi thì `link_preview` về `null` cùng với nội dung.
+
+Đây là chỗ DUY NHẤT server tải một URL do người dùng cung cấp, nên nó chặn SSRF nhiều lớp: chỉ `http`/`https`; cấm dải nội bộ (RFC1918, loopback, link-local `169.254.169.254`, CGNAT, IPv6 riêng, IPv4 khoác áo IPv6); **tra DNS rồi mới quyết** để chặn tên miền công khai trỏ ngược vào loopback; tự đi theo chuyển hướng và kiểm lại từng chặng (tối đa 3); chỉ đọc `text/html`, cắt ở 512 KB, chờ tối đa 6 giây. `og:image` trỏ vào mạng nội bộ cũng bị bỏ — nếu không, máy NGƯỜI DÙNG thành công cụ dò cổng trong mạng của chính họ.
+
 ### Hội thoại
 
-- `GET /conversations?page=1&limit=20&q=`: danh sách, tìm theo tên nhóm/người hoặc nội dung tin.
+- `GET /conversations?page=1&limit=20&q=&type=`: danh sách hội thoại.
+  `q` tìm theo TÊN — tên nhóm hoặc tên thành viên. Không tìm nội dung tin nhắn: kết quả là
+  hội thoại chứ không phải tin, nên một hội thoại khớp vì nội dung sẽ hiện ra mà không có
+  đoạn trích nào giải thích vì sao. Tìm trong nội dung một hội thoại thì dùng
+  `GET /conversations/:id/messages?q=`.
+  `q` KHÔNG phân biệt dấu và hoa thường: `dau tu`, `Đầu tư`, `ĐẦU TƯ` cho cùng kết quả.
+  Cách làm: mỗi cột tên có một cột song song đã bỏ dấu (`titleNormalized`,
+  `fullNameNormalized`, `nicknameNormalized`, `aliasNormalized`) do trigger giữ đồng bộ ở
+  mọi đường ghi, kèm index GIN trigram; từ khoá đi qua `searchKey()` cho ra đúng cùng một
+  dạng. Xem migration `202609270002_search_normalized` — nó giải thích vì sao KHÔNG dùng
+  `unaccent`. `GET /friends?q=` dùng chung cơ chế này.
+  `type` nhận `DIRECT` hoặc `GROUP`, phục vụ ba tab tìm kiếm của app; vắng mặt là lấy cả hai.
+  Mỗi dòng kèm `peer_user_id` — id người kia với hội thoại `DIRECT`, `null` với `GROUP` —
+  và `last_seen_at` (ISO hoặc `null`), mốc lần cuối người kia đóng socket chat.
+  Danh sách KHÔNG kèm `members` (chỉ `GET /conversations/:id` có), nên đây là cách duy nhất
+  để client biết dòng hội thoại 1-1 thuộc về ai: tra danh bạ, khớp sự kiện presence, dựng
+  chữ cái đầu khi người kia chưa đặt ảnh.
 - `POST /conversations/direct` body `{ "user_id": "..." }`: tạo/lấy lại chat 1–1 với một người bạn.
 - `POST /conversations/groups` body `{ "title": "...", "member_user_ids": ["..."], "avatar_file_id": "..." }`.
 - `GET /conversations/:conversationId`: chi tiết và danh sách thành viên. Mỗi thành viên kèm `last_read_message_id` và `last_read_at` — dùng để dựng lại dấu "đã xem" cho tin cũ sau khi app mở lại, vì sự kiện `message:read` chỉ phục vụ phiên đang mở.
@@ -51,8 +98,7 @@ Tất cả route dưới đây cần Bearer access token và có prefix `/api/v1
 - `GET /conversations/:conversationId/messages?cursor=&limit=50&q=`: phân trang lùi; response trả theo thứ tự thời gian tăng dần.
 - `POST /conversations/:conversationId/messages`: REST fallback khi socket chưa kết nối.
 - `PATCH /messages/:messageId`: sửa nội dung trong 72 giờ.
-- `DELETE /messages/:messageId`: thu hồi hai phía. Chỉ tác giả gọi được.
-- `DELETE /messages/:messageId/for-me`: xoá ở PHÍA MÌNH. Ai trong hội thoại cũng gọi được, kể cả với tin của người khác — không ai được xoá lời người khác đã nói, nhưng ai cũng cần dọn được hội thoại của chính mình. Tin gốc không đổi, người gửi và các thành viên còn lại vẫn thấy nguyên; những lần `GET /conversations/:id/messages` sau đó của riêng người gọi thì bỏ tin ấy ra. Gọi lặp lại không sao.
+- `DELETE /messages/:messageId`: thu hồi hai phía.
 - `POST /messages/:messageId/save`, `DELETE /messages/:messageId/save`.
 - `GET /saved-messages?page=1&limit=20&q=`.
 - `POST /attachments` multipart field `files`, tối đa 5 tệp, mỗi tệp 10 MB.
@@ -89,11 +135,14 @@ Gửi kèm `reply_to_message_id` thì mọi phản hồi sau đó mang thêm `qu
 
 Tên trường bên trong có tiền tố `source_`, KHÔNG phải `message_id`/`sender_name`/`preview`. `attachment_file_id` chỉ xuất hiện khi tin gốc có tệp đính kèm, `content_preview` cắt ở 200 ký tự. Đoán tên khác đi thì client không văng lỗi — nó dựng ra một khối trích dẫn rỗng, đúng một vạch màu không chữ, và chỉ lộ ra khi tải lại màn.
 
-`POST /conversations/groups`, `POST /groups/:id/members` và `DELETE /groups/:id/members/:userId` trả thêm `system_message` — chính tin vừa được phát qua `message:new`.
+`POST /conversations/groups`, `PATCH /groups/:id`, `POST /groups/:id/members` và `DELETE /groups/:id/members/:userId` trả thêm `system_message` — chính tin vừa được phát qua `message:new`. Ở `PATCH /groups/:id` trường này là `null` khi lần lưu đó không đổi gì thật.
 
 ### Nhóm
 
-- `PATCH /groups/:conversationId`: đổi `title` và/hoặc `avatar_file_id`.
+- `PATCH /groups/:conversationId`: đổi `title` và/hoặc `avatar_file_id`; chỉ chủ nhóm và quản trị viên gọi được.
+  - `avatar_file_id: null` là XOÁ ảnh nhóm. Không gửi khoá đó mới là để ảnh nguyên như cũ — hai thứ này khác nhau, đừng gửi chuỗi rỗng.
+  - Mỗi lần đổi sinh một tin hệ thống trong khung chat ("... đã đổi tên nhóm thành ..."). Đổi cả tên và ảnh trong cùng một lời gọi thì GỘP một tin, nên app hãy gửi một `PATCH` duy nhất thay vì hai.
+  - Đặt lại đúng giá trị đang có thì không sinh tin nào và `system_message` là `null`.
 - `POST /groups/:conversationId/members`: thêm `member_user_ids`.
 - `DELETE /groups/:conversationId/members/:userId`: quản trị viên xóa thành viên.
 - `DELETE /groups/:conversationId/leave`: rời nhóm; nếu chủ nhóm rời, quyền chủ nhóm được chuyển cho thành viên còn lại.
