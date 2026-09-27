@@ -198,6 +198,7 @@ model User {
   createdAt                    DateTime               @default(now())
   updatedAt                    DateTime               @updatedAt
   refreshTokens                RefreshToken[]
+  webLoginRequests             WebLoginRequest[]
   passwordResetTickets         PasswordResetTicket[]
   kycSubmissions               KycSubmission[]        @relation("KycOwner")
   reviewedKyc                  KycSubmission[]        @relation("KycReviewer")
@@ -993,4 +994,30 @@ model AuditLog {
   actor      User?    @relation("AuditActor", fields: [actorId], references: [id])
 
   @@index([entityType, entityId, createdAt])
+}
+
+enum WebLoginStatus {
+  PENDING
+  SCANNED
+  APPROVED
+  REJECTED
+  CONSUMED
+}
+
+/// Yêu cầu đăng nhập web bằng mã QR — xem docs/web-qr-login-design.md.
+/// Chỉ `id` nằm trong QR; khoá bí mật chỉ lưu dạng băm.
+model WebLoginRequest {
+  id         String         @id
+  secretHash String
+  status     WebLoginStatus @default(PENDING)
+  userId     String?
+  browser    String?
+  ipAddress  String?
+  expiresAt  DateTime
+  createdAt  DateTime       @default(now())
+  scannedAt  DateTime?
+  decidedAt  DateTime?
+  user       User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
 }

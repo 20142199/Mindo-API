@@ -373,6 +373,17 @@ export class AuthService {
     return { logged_out: true };
   }
 
+  /**
+   * Cấp phiên web cho một yêu cầu đăng nhập QR đã được duyệt trên điện thoại.
+   *
+   * Đi đúng đường với đăng nhập mật khẩu (`issueTokens`), nên phiên này là một
+   * hàng `RefreshToken` độc lập: hiện trong danh sách phiên trên điện thoại và
+   * đăng xuất riêng được. Xem docs/web-qr-login-design.md.
+   */
+  issueWebSession(user: User, context: SessionContext) {
+    return this.issueTokens(user, context);
+  }
+
   private async issueTokens(user: User, context: SessionContext = {}, existingSessionId?: string) {
     const sessionId = existingSessionId ?? randomUUID();
     const payload = { sub: user.id, id: user.id, role: user.role, sid: sessionId, jti: randomBytes(16).toString('hex') };
