@@ -243,4 +243,58 @@ describe('AiProviderService', () => {
     expect(result.content).toBe('Xin chào');
     expect(result.metadata).toMatchObject({ total_tokens: 4 });
   });
+  it('Pollinations: tỷ lệ 9:16 ra width/height dọc, phong cách nối vào mô tả', async () => {
+    process.env.AI_MOCK = 'false';
+    process.env.IMAGE_VENDOR = 'pollinations';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      headers: { get: () => 'image/jpeg' },
+      arrayBuffer: async () => new TextEncoder().encode('x').buffer,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'robot', {
+      imageStyle: 'THREE_D', aspectRatio: '9:16',
+    });
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.searchParams.get('width')).toBe('768');
+    expect(url.searchParams.get('height')).toBe('1344');
+    expect(decodeURIComponent(url.pathname)).toContain('3D render');
+    expect(result.metadata).toMatchObject({ width: 768, height: 1344 });
+  });
+
+  it('Pollinations: không truyền tuỳ chọn thì vuông 1024 và giữ nguyên mô tả', async () => {
+    process.env.AI_MOCK = 'false';
+    process.env.IMAGE_VENDOR = 'pollinations';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      headers: { get: () => 'image/jpeg' },
+      arrayBuffer: async () => new TextEncoder().encode('x').buffer,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'robot');
+
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.searchParams.get('width')).toBe('1024');
+    expect(url.searchParams.get('height')).toBe('1024');
+    expect(decodeURIComponent(url.pathname)).toBe('/prompt/robot');
+  });
+
+  it('Gemini: tỷ lệ đi vào generationConfig.imageConfig.aspectRatio', async () => {
+    process.env.AI_MOCK = 'false';
+    process.env.GEMINI_API_KEY = 'gemini-key';
+    delete process.env.IMAGE_VENDOR;
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'aW1hZ2U=' } }] } }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'robot', { aspectRatio: '4:3' });
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.generationConfig.imageConfig).toEqual({ aspectRatio: '4:3' });
+  });
 });

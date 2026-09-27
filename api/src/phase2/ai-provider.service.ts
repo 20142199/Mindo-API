@@ -1,5 +1,6 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { AiExpert, AiMessageKind } from '@prisma/client';
+import { AiAspectRatio, AiImageStyle, aspectRatioOf, imageDimensions, imageStyleOf, styledPrompt } from './ai-image.options';
 
 export type AiContextMessage = { role: 'user' | 'assistant'; content: string };
 export type AiInputFile = { name: string; mimeType: string; content: Buffer };
@@ -10,6 +11,9 @@ export type AiGenerateOptions = {
   attachment?: AiInputFile;
   signal?: AbortSignal;
   onDelta?: (content: string) => Promise<void>;
+  /* Chỉ dùng cho IMAGE — xem ai-image.options.ts */
+  imageStyle?: AiImageStyle;
+  aspectRatio?: AiAspectRatio;
 };
 type AiVendor = 'gemini' | 'deepseek' | 'pollinations';
 /* Nhà cung cấp ảnh — tách khỏi `AiVendor` vì không phải nhà nào cũng làm chữ */
@@ -35,7 +39,7 @@ export class AiProviderService {
       if (kind !== AiMessageKind.IMAGE) await options.onDelta?.(result.content);
       return result;
     }
-    if (kind === AiMessageKind.IMAGE) return this.generateImage(input, startedAt, options.signal);
+    if (kind === AiMessageKind.IMAGE) return this.generateImage(input, startedAt, options);
 
     const taskInstruction = kind === AiMessageKind.TRANSLATION
       ? `Dịch nội dung từ ${options.sourceLanguage ?? 'ngôn ngữ tự động nhận diện'} sang ${options.targetLanguage ?? 'Tiếng Việt'}. Chỉ trả về bản dịch.`
@@ -189,10 +193,13 @@ export class AiProviderService {
     return process.env.IMAGE_VENDOR?.trim().toLowerCase() === 'pollinations' ? 'pollinations' : 'gemini';
   }
 
-  private generateImage(input: string, startedAt: number, signal?: AbortSignal): Promise<AiResult> {
+  private generateImage(input: string, startedAt: number, options: AiGenerateOptions): Promise<AiResult> {
+    const ratio = aspectRatioOf(options.aspectRatio);
+    /* Phong cách ghép vào mô tả ở ĐÂY, một chỗ cho mọi nhà cung cấp */
+    const prompt = styledPrompt(input, imageStyleOf(options.imageStyle));
     return this.imageVendor() === 'pollinations'
-      ? this.generatePollinationsImage(input, startedAt, signal)
-      : this.generateGeminiImage(input, startedAt, signal);
+      ? this.generatePollinationsImage(prompt, ratio, startedAt, options.signal)
+      : this.generateGeminiImage(prompt, ratio, startedAt, options.signal);
   }
 
   /**
@@ -209,11 +216,12 @@ export class AiProviderService {
    * `encodeURIComponent`: một dấu `?` người dùng gõ mà không escape là toàn bộ
    * phần sau bị đọc thành tham số.
    */
-  private async generatePollinationsImage(input: string, startedAt: number, signal?: AbortSignal): Promise<AiResult> {
+  private async generatePollinationsImage(input: string, ratio: AiAspectRatio, startedAt: number, signal?: AbortSignal): Promise<AiResult> {
     const vendor: AiVendor = 'pollinations';
+    const { width, height } = imageDimensions(ratio);
     const baseUrl = (process.env.POLLINATIONS_BASE_URL ?? 'https://image.pollinations.ai').replace(/\/+$/, '');
     const model = process.env.POLLINATIONS_MODEL ?? 'flux';
-    const url = `${baseUrl}/prompt/${encodeURIComponent(input)}?width=1024&height=1024&nologo=true&model=${encodeURIComponent(model)}`;
+    const url = `${baseUrl}/prompt/${encodeURIComponent(input)}?width=${width}&height=${height}&nologo=true&model=${encodeURIComponent(model)}`;
 
     let response: Response;
     try {
@@ -246,14 +254,14 @@ export class AiProviderService {
         vendor,
         model,
         credits: 1,
-        width: 1024,
-        height: 1024,
+        width,
+        height,
         latency_ms: Date.now() - startedAt,
       },
     };
   }
 
-  private async generateGeminiImage(input: string, startedAt: number, signal?: AbortSignal): Promise<AiResult> {
+  private async generateGeminiImage(input: string, ratio: AiAspectRatio, startedAt: number, signal?: AbortSignal): Promise<AiResult> {
     const vendor: AiVendor = 'gemini';
     const apiKey = process.env.GEMINI_API_KEY?.trim();
     if (!apiKey) throw new ServiceUnavailableException({ message: 'Chưa cấu hình Gemini để tạo ảnh', code: 'GEMINI_NOT_CONFIGURED' });
@@ -266,7 +274,7 @@ export class AiProviderService {
         'x-goog-api-key': apiKey,
       }, {
         contents: [{ role: 'user', parts: [{ text: input }] }],
-        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+        generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: ratio } },
       }, signal);
     } catch (error) {
       const status = error instanceof VendorError ? error.status : null;
@@ -294,8 +302,7 @@ export class AiProviderService {
         vendor,
         model,
         credits: 1,
-        width: 1024,
-        height: 1024,
+        ...imageDimensions(ratio),
         input_tokens: inputTokens,
         output_tokens: outputTokens,
         total_tokens: data.usageMetadata?.totalTokenCount ?? inputTokens + outputTokens,
