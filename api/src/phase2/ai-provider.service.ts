@@ -11,7 +11,9 @@ export type AiGenerateOptions = {
   signal?: AbortSignal;
   onDelta?: (content: string) => Promise<void>;
 };
-type AiVendor = 'gemini' | 'deepseek';
+type AiVendor = 'gemini' | 'deepseek' | 'pollinations';
+/* Nhà cung cấp ảnh — tách khỏi `AiVendor` vì không phải nhà nào cũng làm chữ */
+type ImageVendor = 'gemini' | 'pollinations';
 type TokenUsage = { inputTokens: number; outputTokens: number; totalTokens: number };
 type AiResult = {
   content: string;
@@ -33,7 +35,7 @@ export class AiProviderService {
       if (kind !== AiMessageKind.IMAGE) await options.onDelta?.(result.content);
       return result;
     }
-    if (kind === AiMessageKind.IMAGE) return this.generateGeminiImage(input, startedAt, options.signal);
+    if (kind === AiMessageKind.IMAGE) return this.generateImage(input, startedAt, options.signal);
 
     const taskInstruction = kind === AiMessageKind.TRANSLATION
       ? `Dịch nội dung từ ${options.sourceLanguage ?? 'ngôn ngữ tự động nhận diện'} sang ${options.targetLanguage ?? 'Tiếng Việt'}. Chỉ trả về bản dịch.`
@@ -168,6 +170,86 @@ export class AiProviderService {
       vendor,
       model: data.model ?? model,
       usage: { inputTokens, outputTokens, totalTokens: data.usage?.total_tokens ?? inputTokens + outputTokens },
+    };
+  }
+
+  /**
+   * Chọn nhà tạo ảnh.
+   *
+   * Tách hẳn khỏi `LLM_PRIMARY_VENDOR` vì chữ và ảnh không nhất thiết mua của
+   * cùng một nhà — và thực tế đang đúng như vậy: key Gemini hiện tại gọi model
+   * chat thì 200, gọi model ảnh thì 429 kèm `limit: 0`, tức bậc miễn phí không
+   * cấp suất tạo ảnh nào. Ép hai thứ đi chung một biến thì muốn đổi ảnh phải
+   * hi sinh cả phần chữ đang chạy tốt.
+   *
+   * Mặc định vẫn là `gemini`: đổi hành vi sau lưng người đang chạy là cách
+   * nhanh nhất để một môi trường im lặng dùng nhà khác mà không ai hay.
+   */
+  private imageVendor(): ImageVendor {
+    return process.env.IMAGE_VENDOR?.trim().toLowerCase() === 'pollinations' ? 'pollinations' : 'gemini';
+  }
+
+  private generateImage(input: string, startedAt: number, signal?: AbortSignal): Promise<AiResult> {
+    return this.imageVendor() === 'pollinations'
+      ? this.generatePollinationsImage(input, startedAt, signal)
+      : this.generateGeminiImage(input, startedAt, signal);
+  }
+
+  /**
+   * Tạo ảnh qua Pollinations — nhà DUY NHẤT không cần API key.
+   *
+   * Có mặt ở đây để luồng tạo ảnh chạy được từ app xuống tận nơi trong lúc
+   * chưa ai cấp key. Đừng nhầm nó là lựa chọn cho bản chạy thật: đây là dịch
+   * vụ công cộng miễn phí, không cam kết tốc độ cũng không cam kết còn sống.
+   *
+   * Khác mọi nhà còn lại ở hai điểm, nên không dùng lại `request()` được:
+   * GET chứ không POST-JSON, và trả về THẲNG byte ảnh chứ không phải JSON.
+   *
+   * Mô tả nằm trong PATH chứ không phải query, nên bắt buộc
+   * `encodeURIComponent`: một dấu `?` người dùng gõ mà không escape là toàn bộ
+   * phần sau bị đọc thành tham số.
+   */
+  private async generatePollinationsImage(input: string, startedAt: number, signal?: AbortSignal): Promise<AiResult> {
+    const vendor: AiVendor = 'pollinations';
+    const baseUrl = (process.env.POLLINATIONS_BASE_URL ?? 'https://image.pollinations.ai').replace(/\/+$/, '');
+    const model = process.env.POLLINATIONS_MODEL ?? 'flux';
+    const url = `${baseUrl}/prompt/${encodeURIComponent(input)}?width=1024&height=1024&nologo=true&model=${encodeURIComponent(model)}`;
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'GET',
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS ?? 60_000))])
+          : AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS ?? 60_000)),
+      });
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      throw new ServiceUnavailableException({ message: 'Chưa tạo được ảnh', code: 'POLLINATIONS_IMAGE_FAILED', provider_status: null });
+    }
+    if (!response.ok) {
+      throw new ServiceUnavailableException({ message: 'Chưa tạo được ảnh', code: 'POLLINATIONS_IMAGE_FAILED', provider_status: response.status });
+    }
+
+    const mimeType = response.headers.get('content-type')?.split(';')[0]?.trim() || 'image/jpeg';
+    const content = Buffer.from(await response.arrayBuffer());
+    /* Thân rỗng vẫn là 200 bên Pollinations lúc quá tải — bắt ở đây, kẻo tin
+       nhắn về tới app mang một tệp 0 byte và không ai biết vì sao */
+    if (!content.length) {
+      throw new ServiceUnavailableException({ message: 'Chưa tạo được ảnh', code: 'POLLINATIONS_IMAGE_EMPTY' });
+    }
+
+    return {
+      content: 'Ảnh đã được tạo theo yêu cầu.',
+      attachmentData: { content, mimeType, filename: `mindo-ai-${Date.now()}.${this.imageExtension(mimeType)}` },
+      metadata: {
+        vendor,
+        model,
+        credits: 1,
+        width: 1024,
+        height: 1024,
+        latency_ms: Date.now() - startedAt,
+      },
     };
   }
 

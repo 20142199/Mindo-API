@@ -103,6 +103,93 @@ describe('AiProviderService', () => {
     expect(result.metadata).toMatchObject({ vendor: 'gemini', model: 'gemini-image-test', input_tokens: 2, output_tokens: 4 });
   });
 
+  /*
+    Tạo ảnh không còn đóng cứng vào Gemini. Lý do rất cụ thể: key Gemini hiện
+    tại gọi model chat thì 200, gọi model ảnh thì 429 với `limit: 0` — bậc
+    miễn phí KHÔNG cấp suất tạo ảnh, đợi sang ngày cũng vẫn 0. Phải bật thanh
+    toán mới dùng được, mà lúc này chưa có.
+
+    Nên `IMAGE_VENDOR` tách riêng khỏi `LLM_PRIMARY_VENDOR`: chữ và ảnh không
+    nhất thiết mua của cùng một nhà. Mặc định vẫn là gemini để không đổi hành
+    vi sau lưng ai; muốn khác thì phải khai báo.
+  */
+  it('mặc định vẫn tạo ảnh bằng Gemini khi không khai IMAGE_VENDOR', async () => {
+    process.env.AI_MOCK = 'false';
+    process.env.GEMINI_API_KEY = 'gemini-key';
+    delete process.env.IMAGE_VENDOR;
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'aW1hZ2U=' } }] } }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'nhà xanh');
+
+    expect(result.metadata).toMatchObject({ vendor: 'gemini' });
+    expect(String(fetchMock.mock.calls[0][0])).toContain('generativelanguage');
+  });
+
+  it('IMAGE_VENDOR=pollinations thì gọi Pollinations và KHÔNG cần API key', async () => {
+    /* Nhà duy nhất chạy được ngay khi chưa ai cấp key — dùng để thông luồng */
+    process.env.AI_MOCK = 'false';
+    delete process.env.GEMINI_API_KEY;
+    process.env.IMAGE_VENDOR = 'pollinations';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? 'image/jpeg' : null) },
+      arrayBuffer: async () => new TextEncoder().encode('anh-gia').buffer,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'mèo đen đội mũ');
+
+    expect(result.attachmentData?.content.toString()).toBe('anh-gia');
+    expect(result.attachmentData?.mimeType).toBe('image/jpeg');
+    expect(result.metadata).toMatchObject({ vendor: 'pollinations' });
+    const [url, init] = fetchMock.mock.calls[0] as [string, { method?: string; headers?: Record<string, string> }];
+    expect(url).toContain('image.pollinations.ai/prompt/');
+    /* GET, không phải POST-JSON như các nhà kia */
+    expect(init?.method ?? 'GET').toBe('GET');
+    /* Không được gắn Authorization: không có key nào để gắn, gắn bừa là 401 */
+    expect(JSON.stringify(init?.headers ?? {})).not.toContain('Authorization');
+  });
+
+  it('mô tả ảnh được escape vào đường dẫn, không vỡ URL', async () => {
+    /*
+      Pollinations nhận mô tả NẰM TRONG path chứ không phải query. Dấu cách,
+      dấu tiếng Việt, dấu `/` và `?` của người dùng mà không escape thì hoặc
+      gãy URL hoặc lạc sang endpoint khác.
+    */
+    process.env.AI_MOCK = 'false';
+    process.env.IMAGE_VENDOR = 'pollinations';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: { get: () => 'image/jpeg' },
+      arrayBuffer: async () => new TextEncoder().encode('x').buffer,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'mèo/chó? đội mũ');
+
+    const url = String(fetchMock.mock.calls[0][0]);
+    expect(url).toContain(encodeURIComponent('mèo/chó? đội mũ'));
+    /* phần sau `?` phải là tham số của mình, không phải mẩu câu hỏi lọt ra */
+    expect(url.split('?')[1] ?? '').not.toContain('đội');
+  });
+
+  it('Pollinations hỏng thì báo lỗi có mã riêng, không đội lốt Gemini', async () => {
+    process.env.AI_MOCK = 'false';
+    process.env.IMAGE_VENDOR = 'pollinations';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 502, headers: { get: () => null } }));
+
+    await expect(
+      new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'mèo'),
+    ).rejects.toMatchObject({ response: { code: 'POLLINATIONS_IMAGE_FAILED' } });
+  });
+
   it('adds translation instructions to Gemini systemInstruction', async () => {
     process.env.AI_MOCK = 'false';
     process.env.GEMINI_API_KEY = 'gemini-key';
