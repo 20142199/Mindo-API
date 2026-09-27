@@ -18,7 +18,11 @@ describe('NewsAiSummaryService', () => {
     process.env.GEMINI_API_KEY = 'test-key';
     process.env.GEMINI_NATIVE_BASE_URL = 'https://gemini.example.test/v1beta';
     process.env.NEWS_AI_SUMMARY_MODEL = 'summary-model';
-    const editorialContent = 'Đây là nội dung bài viết tiếng Việt đã được biên tập lại từ nguồn, giữ nguyên các dữ kiện và số liệu quan trọng. Nội dung được trình bày rõ ràng cho người đọc.';
+    const editorialParagraphs = [
+      'Đây là nội dung bài viết tiếng Việt đã được biên tập lại từ nguồn, giữ nguyên các dữ kiện và số liệu quan trọng.',
+      'Nội dung được trình bày rõ ràng cho người đọc, mỗi ý lớn là một đoạn riêng.',
+    ];
+    const editorialContent = editorialParagraphs.join('\n\n');
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -28,7 +32,7 @@ describe('NewsAiSummaryService', () => {
           title: 'Tiêu đề tiếng Việt',
           short_summary: 'Mô tả ngắn bằng tiếng Việt.',
           summary_lines: ['Dòng một.', 'Dòng hai.', 'Dòng ba.', 'Dòng bốn.'],
-          content: editorialContent,
+          content_paragraphs: editorialParagraphs,
         }) }] } }],
       }),
     });
@@ -52,7 +56,8 @@ describe('NewsAiSummaryService', () => {
     };
     expect(fetchMock.mock.calls[0][0]).toBe('https://gemini.example.test/v1beta/models/summary-model:generateContent');
     expect(request.generationConfig.responseMimeType).toBe('application/json');
-    expect(request.generationConfig.responseSchema.required).toEqual(['title', 'short_summary', 'summary_lines', 'content']);
+    // Đoạn văn là MẢNG: để `content` dạng chuỗi thì Gemini trả cả bài liền một khối, không một dấu xuống dòng.
+    expect(request.generationConfig.responseSchema.required).toEqual(['title', 'short_summary', 'summary_lines', 'content_paragraphs']);
     // Gemini trả 400 "Unknown name additionalProperties" nếu schema có trường này.
     expect(request.generationConfig.responseSchema).not.toHaveProperty('additionalProperties');
     expect(request.systemInstruction.parts[0].text).toContain('bản tin độc lập bằng tiếng Việt');
@@ -87,6 +92,28 @@ describe('NewsAiSummaryService', () => {
     expect(request.generationConfig.responseSchema.required).toContain('topic_slug');
     expect(request.generationConfig.responseSchema.properties.topic_slug.enum).toEqual(['vi-mo', 'chung-khoan', 'none']);
     expect(request.systemInstruction.parts[0].text).toContain('vi-mo (Vĩ mô)');
+  });
+
+  it('treats every line as a paragraph when a provider still sends content as one string', async () => {
+    // DeepSeek không bị ràng buộc bởi schema, nên vẫn có thể trả `content` là chuỗi, ngăn đoạn bằng MỘT dấu xuống dòng.
+    process.env.AI_MOCK = 'false';
+    process.env.GEMINI_API_KEY = 'test-key';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+        title: 'Tiêu đề tiếng Việt', short_summary: 'Mô tả.', summary_lines: ['Một.', 'Hai.', 'Ba.', 'Bốn.'],
+        content: 'Đoạn thứ nhất đủ dài để qua bước kiểm tra độ đầy đủ của bản biên tập.\nĐoạn thứ hai   giữ nguyên số liệu 5,19% của nguồn.\n\n\nĐoạn thứ ba.',
+      }) }] } }] }),
+    }));
+
+    const result = await new NewsAiSummaryService().createEditorialDraft('Tiêu đề nguồn', 'Nội dung nguồn');
+
+    expect(result.content.split('\n\n')).toEqual([
+      'Đoạn thứ nhất đủ dài để qua bước kiểm tra độ đầy đủ của bản biên tập.',
+      'Đoạn thứ hai giữ nguyên số liệu 5,19% của nguồn.',
+      'Đoạn thứ ba.',
+    ]);
   });
 
   it('rejects an incomplete editorial response', async () => {
