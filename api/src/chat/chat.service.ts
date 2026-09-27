@@ -28,7 +28,7 @@ import {
   UpdateGroupConversationDto,
 } from './chat.dto';
 import { ChatPresenceService } from './chat-presence.service';
-import { directConversationKey, messagePreview, searchKey } from './chat.domain';
+import { RECALLED_MESSAGE_PREVIEW, directConversationKey, messagePreview, searchKey } from './chat.domain';
 
 type BasicUser = Pick<User, 'id' | 'fullName' | 'nickname' | 'email' | 'phone' | 'avatarFileId' | 'lastSeenAt'>;
 
@@ -873,7 +873,7 @@ export class ChatService {
           sender_name: lastMessage.sender?.nickname ?? lastMessage.sender?.fullName ?? null,
           is_own: lastMessage.senderId === userId,
           message_type: lastMessage.type,
-          preview: lastMessage.deletedAt ? 'Tin nhắn đã được thu hồi' : messagePreview(lastMessage.type, lastMessage.content),
+          preview: lastMessage.deletedAt ? RECALLED_MESSAGE_PREVIEW : messagePreview(lastMessage.type, lastMessage.content),
           created_at: lastMessage.createdAt.toISOString(),
         } : null,
         last_message_at: row.lastMessageAt.toISOString(),
@@ -903,20 +903,40 @@ export class ChatService {
       if (!Array.isArray(row.attachments)) return [];
       return row.attachments.map((item) => (item as Record<string, unknown>).file_id).filter((id): id is string => typeof id === 'string');
     }))];
-    const [fileRows, savedRows] = await Promise.all([
+    /* Ô trích dẫn là ảnh chụp lúc gửi (xem `buildQuotedSnapshot`), nên nó
+       KHÔNG tự biết tin gốc về sau có bị thu hồi hay không. Hỏi một lượt cho
+       cả lô thay vì từng tin: một truy vấn thêm cho mỗi trang tin nhắn. */
+    const quotedIds = [...new Set(rows.map((row) => row.replyToId).filter((id): id is string => !!id))];
+    const [fileRows, savedRows, recalledRows] = await Promise.all([
       fileIds.length ? this.prisma.fileUpload.findMany({ where: { id: { in: fileIds } } }) : [],
       rows.length ? this.prisma.savedChatMessage.findMany({ where: { userId, messageId: { in: rows.map((row) => row.id) } }, select: { messageId: true } }) : [],
+      quotedIds.length
+        ? this.prisma.chatMessage.findMany({ where: { id: { in: quotedIds }, deletedAt: { not: null } }, select: { id: true } })
+        : [],
     ]);
     const files = new Map(fileRows.map((file) => [file.id, file]));
     const saved = new Set(savedRows.map((row) => row.messageId));
-    return rows.map((row) => this.serializeMessageWithMaps(userId, row, files, saved));
+    const recalled = new Set(recalledRows.map((row) => row.id));
+    return rows.map((row) => this.serializeMessageWithMaps(userId, row, files, saved, recalled));
   }
 
   private async serializeMessage(userId: string, row: MessageRow) {
     return (await this.serializeMessages(userId, [row]))[0];
   }
 
-  private serializeMessageWithMaps(userId: string, row: MessageRow, files: Map<string, FileUpload>, saved: Set<string>) {
+  /**
+   * Bỏ nội dung đã sao chép ra khỏi ô trích dẫn khi tin gốc đã bị thu hồi.
+   *
+   * Giữ lại tên người bị trích: đó không phải nội dung, và bỏ nốt thì ô trích
+   * dẫn thành một mẩu trống không rõ đang nói về ai.
+   */
+  private redactQuote(snapshot: unknown) {
+    if (!snapshot || typeof snapshot !== 'object') return snapshot;
+    const { attachment_file_id: _dropped, ...rest } = snapshot as Record<string, unknown>;
+    return { ...rest, content_preview: RECALLED_MESSAGE_PREVIEW };
+  }
+
+  private serializeMessageWithMaps(userId: string, row: MessageRow, files: Map<string, FileUpload>, saved: Set<string>, recalled: Set<string>) {
     const attachments = Array.isArray(row.attachments)
       ? row.attachments.map((value) => {
         const item = value as Record<string, unknown>;
@@ -938,7 +958,11 @@ export class ChatService {
       call_info: row.callInfo ?? null,
       attachments: row.deletedAt ? [] : attachments,
       reply_to_message_id: row.replyToId,
-      quoted_message: row.quotedMessageSnapshot,
+      /* Thu hồi phải với tới cả bản sao nằm trong ô trích dẫn của người
+         khác — còn đọc được thì coi như chưa thu hồi. */
+      quoted_message: row.replyToId && recalled.has(row.replyToId)
+        ? this.redactQuote(row.quotedMessageSnapshot)
+        : row.quotedMessageSnapshot,
       is_saved: saved.has(row.id),
       edited_at: row.editedAt?.toISOString() ?? null,
       deleted_at: row.deletedAt?.toISOString() ?? null,
