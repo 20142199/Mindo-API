@@ -225,12 +225,34 @@ export class ChatRealtimeService implements OnModuleDestroy {
       });
     });
 
+    /*
+     * Báo "đang soạn tin" phải tới được CẢ người không mở hội thoại.
+     *
+     * Bản đầu chỉ bắn vào `channel:<id>`, mà người ta chỉ vào phòng đó khi
+     * MỞ hội thoại. Nên đứng ở màn danh sách thì không bao giờ nhận được —
+     * dù client đã sẵn sàng hiện "Đang soạn tin…" ngay trên dòng xem trước.
+     *
+     * Nay bắn thêm vào phòng riêng của từng thành viên khác. Phòng
+     * `user:<id>` được vào lúc kết nối nên luôn tới, kể cả khi họ đang đứng
+     * ở tab khác.
+     *
+     * Hai phòng có thể trùng nhau ở người đang mở hội thoại, nhưng
+     * Socket.IO khử trùng theo socket khi phát tới nhiều phòng trong MỘT lời
+     * gọi, nên gộp cả hai vào một `.to()` thay vì gọi hai lần.
+     */
     for (const event of ['typing:start', 'typing:stop'] as const) {
       socket.on(event, async (payload: unknown, ack?: Ack) => {
         await this.handle(socket, event, ack, async () => {
           const conversationId = this.conversationId(payload);
           await this.chat.assertMembership(userId, conversationId);
-          socket.to(this.channelRoom(conversationId)).emit('typing:peer', {
+
+          const memberIds = await this.chat.getMemberUserIds(conversationId);
+          const rooms = [
+            this.channelRoom(conversationId),
+            ...memberIds.filter((id) => id !== userId).map((id) => this.userRoom(id)),
+          ];
+
+          socket.to(rooms).emit('typing:peer', {
             channelId: conversationId,
             userId,
             isTyping: event === 'typing:start',
