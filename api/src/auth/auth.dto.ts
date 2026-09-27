@@ -78,3 +78,13 @@ export class RefreshDto {
 export class UpdatePushTokenDto {
   @IsString() @MinLength(20) @MaxLength(4096) fcm_token!: string;
 }
+
+/** Web tạo mã QR — `device_info` là user-agent của trình duyệt, do BFF chuyển tiếp */
+export class CreateWebLoginDto {
+  @IsOptional() @IsString() @MaxLength(255) device_info?: string;
+}
+
+/** Web hỏi trạng thái mã — `secret` là khoá chỉ trình duyệt tạo mã giữ, không nằm trong QR */
+export class PollWebLoginDto {
+  @IsString() @Length(16, 128) secret!: string;
+}

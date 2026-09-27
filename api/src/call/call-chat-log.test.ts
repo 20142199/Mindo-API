@@ -69,11 +69,22 @@ function build(existingConversation: string | null = 'conv-1') {
   } as unknown as PrismaService;
 
   const publishConversation = vi.fn(() => Promise.resolve());
+  const publishSystemMessageById = vi.fn(
+    (_conversationId: string, _messageId: string, _viewerId: string) => Promise.resolve(),
+  );
   const service = new CallChatLogService(prisma, {
     publishConversation,
+    publishSystemMessageById,
   } as unknown as ChatRealtimeService);
 
-  return { service, create, conversationCreate, publishConversation, prisma };
+  return {
+    service,
+    create,
+    conversationCreate,
+    publishConversation,
+    publishSystemMessageById,
+    prisma,
+  };
 }
 
 describe('ghi cuộc gọi thành tin trong hội thoại', () => {
@@ -131,6 +142,21 @@ describe('ghi cuộc gọi thành tin trong hội thoại', () => {
 
     expect(publishConversation).toHaveBeenCalledWith('conv-1');
   });
+
+  /* `publishConversation` chỉ cập nhật DANH SÁCH hội thoại — nó bắn
+     `conversation:updated` vào phòng riêng của từng người. Màn CHAT đang mở
+     nghe `message:new` ở phòng hội thoại, nên thiếu lời gọi dưới đây thì dòng
+     nhật ký không hiện cho tới khi người dùng thoát ra rồi vào lại.
+
+     Đo được trên iPhone 14 Pro Max (27/09/2026): cúp máy xong bấm "Đóng" về
+     đúng hội thoại mà không thấy dòng mới, trong khi danh sách ngoài đã đổi. */
+  it('bắn cả vào phòng hội thoại để màn đang mở thấy ngay', async () => {
+    const { service, publishSystemMessageById } = build();
+
+    await service.record(call());
+
+    expect(publishSystemMessageById).toHaveBeenCalledWith('conv-1', 'm-1', 'u-me');
+  });
 });
 
 describe('câu chữ của từng kết cục', () => {
@@ -186,6 +212,17 @@ describe('nhật ký hỏng không được chặn việc cúp máy', () => {
     const { prisma } = build();
     const service = new CallChatLogService(prisma, {
       publishConversation: vi.fn(() => Promise.reject(new Error('socket chết'))),
+      publishSystemMessageById: vi.fn(() => Promise.resolve()),
+    } as unknown as ChatRealtimeService);
+
+    await expect(service.record(call())).resolves.toBeUndefined();
+  });
+
+  it('bắn vào phòng hội thoại hỏng cũng không ném', async () => {
+    const { prisma } = build();
+    const service = new CallChatLogService(prisma, {
+      publishConversation: vi.fn(() => Promise.resolve()),
+      publishSystemMessageById: vi.fn(() => Promise.reject(new Error('phòng chết'))),
     } as unknown as ChatRealtimeService);
 
     await expect(service.record(call())).resolves.toBeUndefined();

@@ -144,6 +144,40 @@ The field names match `POST /reset-password`: both endpoints set a new password,
 
 > The new-password field used to be named `password`, which read like the *current* password. It was renamed on 2026-09-23 together with the app. A client still sending `password` gets HTTP 400.
 
+## Web login by QR code
+
+The web shows a QR code; the Mindo app, already signed in, scans it and confirms, and the browser is signed in to the same account. Design and security model: [`web-qr-login-design.md`](web-qr-login-design.md).
+
+The QR carries only a public `session_id`. Claiming the tokens also needs the `secret` returned at creation, which the web BFF keeps in an httpOnly cookie and never puts in the QR — someone who photographs the code cannot take the session.
+
+**Web (no token, through the BFF):**
+
+```http
+POST /api/v1/investor/auth/qr
+{ "device_info": "<browser user-agent>" }
+→ { "session_id": "<uuid>", "secret": "…", "qr_value": "mindo://web-login?session=<uuid>", "expires_at": "ISO" }
+
+POST /api/v1/investor/auth/qr/:session_id/poll
+{ "secret": "…" }
+→ { "status": "pending" | "scanned" | "rejected" | "expired" }
+→ { "status": "approved", "user": {…}, "access_token": "…", "refresh_token": "…", "session_id": "…" }
+```
+
+Poll every 2 seconds. The `approved` response is returned **exactly once** — the request moves to `CONSUMED` in the same step, and later polls answer `expired`. A wrong secret answers `404 QR_NOT_FOUND`, the same as an unknown id.
+
+**App (bearer token):**
+
+```http
+POST /api/v1/investor/auth/qr/:session_id/scan     → { "browser": "Chrome trên macOS", "ip_address": "…", "created_at": "ISO" }
+POST /api/v1/investor/auth/qr/:session_id/approve  → { "status": "approved" }
+POST /api/v1/investor/auth/qr/:session_id/reject   → { "status": "rejected" }
+```
+
+- A code lives 60 seconds; scanning extends it by another 60 so the user has time to confirm.
+- Scanning again by the **same** account returns the same payload; a **different** account gets `409 QR_ALREADY_SCANNED`.
+- Only the account that scanned can approve or reject. Anything else, or an expired code, gets `410 QR_EXPIRED`.
+- The web session is issued through the same path as password login: an independent session (`device_type: desktop`) that shows up in the phone's session list and can be signed out on its own.
+
 ## Error codes
 
 Every auth error carries a stable `code` beside the Vietnamese `message`, following the convention already used by `FriendService` and `CallService`:
@@ -176,6 +210,9 @@ Match on `code`, never on the text of `message` — the wording may change, and 
 | `AUTH_REFRESH_INVALID` | 401 | Refresh token malformed |
 | `AUTH_REFRESH_REVOKED` | 401 | Refresh token no longer valid |
 | `AUTH_ACCOUNT_INACTIVE` | 401 | Account disabled |
+| `QR_NOT_FOUND` | 404 | Web login code unknown, or the secret does not match |
+| `QR_EXPIRED` | 410 | Web login code expired, already used, or decided by someone else |
+| `QR_ALREADY_SCANNED` | 409 | Web login code already scanned by another account |
 | `VALIDATION_FAILED` | 400 | DTO rejected — see the `errors` array |
 
 ## Validation and status codes

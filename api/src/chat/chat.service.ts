@@ -772,6 +772,24 @@ export class ChatService {
    * nhận: `is_own` so theo `senderId`, mà tin hệ thống không có người gửi
    * (`null`), còn `is_saved` thì tin vừa tạo chưa ai lưu được.
    */
+  /**
+   * Payload của MỘT tin, đúng hình dạng mà REST trả về.
+   *
+   * Dùng để phát lại qua socket một tin do luồng khác sinh ra — cụ thể là nhật
+   * ký cuộc gọi, thứ được ghi bên cụm Gọi chứ không đi qua `sendMessage`.
+   *
+   * `userId` chỉ để dựng `is_own`, mà tầng phát sóng gỡ trường đó ra trước khi
+   * gửi (xem `emitMessage`), nên truyền ai vào cũng không đổi thứ người khác
+   * nhận được.
+   */
+  async messageView(userId: string, messageId: string) {
+    const row = await this.prisma.chatMessage.findUniqueOrThrow({
+      where: { id: messageId },
+      include: { sender: { select: memberUserSelect } },
+    });
+    return this.serializeMessage(userId, row);
+  }
+
   private async createSystemMessage(userId: string, conversationId: string, content: string) {
     const row = await this.prisma.chatMessage.create({
       data: { conversationId, type: ChatMessageType.SYSTEM, content },
