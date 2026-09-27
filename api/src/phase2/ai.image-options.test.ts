@@ -62,3 +62,67 @@ describe('sendMessage — tuỳ chọn ảnh', () => {
     expect(assistantMetadata()).not.toHaveProperty('aspectRatio');
   });
 });
+
+const AUTO_TITLE = 'Tạo robot 3D';
+
+function processHarness(overrides: { kind?: AiMessageKind; title?: string; summarize?: () => Promise<string | null> } = {}) {
+  const message = {
+    id: 'm-bot', conversationId: 'c1', kind: overrides.kind ?? AiMessageKind.IMAGE, status: AiMessageStatus.PENDING,
+    createdAt: new Date(), metadata: { imageStyle: 'THREE_D', aspectRatio: '9:16' },
+    conversation: { id: 'c1', userId: 'u1', title: overrides.title ?? AUTO_TITLE, expert },
+  };
+  const input = { id: 'm-user', role: AiMessageRole.USER, content: AUTO_TITLE, metadata: null, createdAt: new Date() };
+  const prisma = {
+    aiMessage: {
+      findUnique: vi.fn().mockResolvedValueOnce(message).mockResolvedValue({ ...message, status: AiMessageStatus.COMPLETED }),
+      findFirst: vi.fn().mockResolvedValue(input),
+      findMany: vi.fn().mockResolvedValue([]),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    aiConversation: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+  };
+  const provider = {
+    generate: vi.fn().mockResolvedValue({ content: 'Ảnh đã được tạo theo yêu cầu.', metadata: { vendor: 'pollinations' } }),
+    summarizeTitle: vi.fn(overrides.summarize ?? (() => Promise.resolve('Robot Mindo 3D'))),
+  };
+  const service = new AiService(prisma as never, provider as never, {} as never, {} as never);
+  return { service, prisma, provider };
+}
+
+describe('processMessage — ảnh', () => {
+  it('truyền phong cách và tỷ lệ từ metadata xuống nhà cung cấp', async () => {
+    const { service, provider } = processHarness();
+    await service.processMessage('m-bot');
+    expect(provider.generate.mock.calls[0][3]).toMatchObject({ imageStyle: 'THREE_D', aspectRatio: '9:16' });
+  });
+
+  it('ảnh đầu tiên: đặt tiêu đề ngắn, chỉ khi tiêu đề vẫn là mô tả cắt ngắn', async () => {
+    const { service, prisma } = processHarness();
+    await service.processMessage('m-bot');
+    expect(prisma.aiConversation.updateMany).toHaveBeenCalledWith({
+      where: { id: 'c1', title: AUTO_TITLE },
+      data: { title: 'Robot Mindo 3D' },
+    });
+  });
+
+  it('người dùng đã đổi tên thì không gọi đặt tên', async () => {
+    const { service, provider, prisma } = processHarness({ title: 'Tên tôi tự đặt' });
+    await service.processMessage('m-bot');
+    expect(provider.summarizeTitle).not.toHaveBeenCalled();
+    expect(prisma.aiConversation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('đặt tên hỏng thì ẢNH VẪN XONG', async () => {
+    const { service, prisma } = processHarness({ summarize: () => Promise.reject(new Error('down')) });
+    await service.processMessage('m-bot');
+    const completed = prisma.aiMessage.updateMany.mock.calls.find(([args]) => args.data.status === AiMessageStatus.COMPLETED);
+    expect(completed).toBeDefined();
+    expect(prisma.aiConversation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('tin chữ không gọi đặt tên', async () => {
+    const { service, provider } = processHarness({ kind: AiMessageKind.CHAT });
+    await service.processMessage('m-bot');
+    expect(provider.summarizeTitle).not.toHaveBeenCalled();
+  });
+});

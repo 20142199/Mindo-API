@@ -399,6 +399,17 @@ export class AiService {
     const metadata = (message.metadata ?? {}) as Record<string, unknown>;
     const controller = new AbortController();
     this.activeGenerations.set(messageId, controller);
+    /*
+      Tiêu đề chỉ phụ thuộc mô tả, không phụ thuộc ảnh — nên chạy SONG SONG
+      với việc tạo ảnh. Model chữ xong trước model ảnh, thành ra không cộng
+      thêm độ trễ nào. Điều kiện "tiêu đề vẫn là mô tả cắt ngắn" nghĩa là:
+      đây là ảnh đầu của phiên (hoặc lần đầu chưa đặt được), và người dùng
+      chưa tự đổi tên.
+    */
+    const autoTitle = input.content.trim().slice(0, 70);
+    const titlePromise = message.kind === AiMessageKind.IMAGE && message.conversation.title === autoTitle
+      ? this.provider.summarizeTitle(input.content, controller.signal).catch(() => null)
+      : Promise.resolve(null);
     try {
       const contextRows = await this.prisma.aiMessage.findMany({
         where: {
@@ -434,6 +445,8 @@ export class AiService {
           content: storedAttachment.content,
         } : undefined,
         signal: controller.signal,
+        imageStyle: imageStyleOf(metadata.imageStyle),
+        aspectRatio: aspectRatioOf(metadata.aspectRatio),
         onDelta: async (content) => {
           const now = Date.now();
           if (controller.signal.aborted || (content.length - lastStreamedContent.length < 60 && now - lastStreamedAt < 250)) return;
@@ -460,6 +473,18 @@ export class AiService {
         ...(generated.metadata ?? {}),
         ...(generatedFile ? { generatedFileId: generatedFile.id } : {}),
       } as Prisma.InputJsonValue;
+      /*
+        Ghi tiêu đề TRƯỚC khi đánh dấu xong: khung SSE cuối cùng (khung báo
+        xong) đọc lại cả hội thoại, nên tiêu đề mới đi kèm ngay khung đó thay
+        vì app phải nạp thêm một lần. `where` kèm tiêu đề cũ để không đè lên
+        tên người dùng vừa đổi trong lúc chờ.
+      */
+      const shortTitle = await titlePromise;
+      if (shortTitle) {
+        await this.prisma.aiConversation
+          .updateMany({ where: { id: message.conversationId, title: autoTitle }, data: { title: shortTitle } })
+          .catch(() => undefined);
+      }
       const updated = await this.prisma.aiMessage.updateMany({
         where: { id: message.id, status: AiMessageStatus.PENDING },
         data: {
