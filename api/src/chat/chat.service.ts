@@ -42,11 +42,34 @@ const memberUserSelect = {
   lastSeenAt: true,
 } satisfies Prisma.UserSelect;
 
+/**
+ * Thứ tự thành viên: ai vào nhóm trước đứng trước.
+ *
+ * `joinedAt` thôi là CHƯA đủ. Tạo nhóm thì người tạo và mọi người được chọn
+ * cùng vào trong một giao dịch, mà `DEFAULT now()` của Postgres trả về giờ BẮT
+ * ĐẦU giao dịch — cả nhóm có `joinedAt` giống hệt nhau tới từng mili-giây. Hoà
+ * nhau thì Postgres trả thứ tự tuỳ ý, và nó đổi thật: cập nhật nhóm làm các
+ * hàng đổi chỗ vật lý, người tạo nhóm từ đầu danh sách tụt xuống cuối.
+ *
+ * Nên thêm hai khoá phụ, chỉ có tác dụng khi hoà giờ vào:
+ *
+ * - `role` — enum khai báo `OWNER, ADMIN, MEMBER`, sắp tăng dần là chủ nhóm
+ *   lên đầu. Với lứa vào cùng lúc lúc tạo nhóm, đó cũng chính là thứ tự thật:
+ *   người tạo có mặt trước, rồi mới thêm người khác vào.
+ * - `userId` — không mang nghĩa gì, chỉ để thứ tự KHÔNG BAO GIỜ đổi giữa hai
+ *   lần đọc. Những người được chọn cùng một lượt vốn không có ai "vào trước".
+ */
+const memberOrder = [
+  { joinedAt: 'asc' },
+  { role: 'asc' },
+  { userId: 'asc' },
+] satisfies Prisma.ConversationMemberOrderByWithRelationInput[];
+
 const conversationInclude = {
   members: {
     where: { leftAt: null },
     include: { user: { select: memberUserSelect } },
-    orderBy: { joinedAt: 'asc' },
+    orderBy: memberOrder,
   },
   messages: {
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
