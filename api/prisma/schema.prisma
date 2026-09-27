@@ -387,6 +387,9 @@ model Call {
   status         CallStatus @default(RINGING)
   endReason      String?
   ringingAt      DateTime   @default(now())
+  /// Máy người nhận báo đã thấy cuộc gọi (POST /calls/:id/ringing) — người gọi
+  /// đổi "Đang gọi…" thành "Đang đổ chuông…"
+  deliveredAt    DateTime?
   acceptedAt     DateTime?
   endedAt        DateTime?
   durationSec    Int        @default(0)

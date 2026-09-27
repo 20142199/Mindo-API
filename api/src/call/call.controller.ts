@@ -69,6 +69,12 @@ export class CallController {
     return this.calls.upgradeToVideo(authUser(req).id, callId).then((data) => ok(data, 'Đã chuyển sang gọi video'));
   }
 
+  /** Máy người nhận đã thấy cuộc gọi — người gọi hiện "Đang đổ chuông…" */
+  @Post(':callId/ringing')
+  ringing(@Req() req: AuthenticatedRequest, @Param('callId') callId: string) {
+    return this.calls.markRinging(authUser(req).id, callId).then((data) => ok(data));
+  }
+
   @Post(':callId/reject')
   reject(@Req() req: AuthenticatedRequest, @Param('callId') callId: string) {
     return this.calls.reject(authUser(req).id, callId).then((data) => ok(data, 'Đã từ chối cuộc gọi'));

@@ -310,6 +310,28 @@ export class CallService {
     return this.view(row, userId);
   }
 
+  /**
+   * Máy người nhận báo "cuộc gọi đã tới máy tôi" — người gọi đổi "Đang gọi…"
+   * thành "Đang đổ chuông…", như Messenger.
+   *
+   * Idempotent và không ồn ào: đã báo rồi, hay cuộc gọi không còn đổ chuông
+   * (vừa được nghe, vừa bị huỷ), thì trả view như thường mà không ghi gì. Điều
+   * kiện nằm cả trong câu update để hai lần báo chạy song song không ghi đè
+   * mốc đầu tiên.
+   */
+  async markRinging(userId: string, callId: string) {
+    const current = await this.ownedCall(userId, callId);
+    if (current.calleeId !== userId) throw new ForbiddenException('Bạn không phải người nhận cuộc gọi này');
+    if (current.status !== CallStatus.RINGING || current.deliveredAt) {
+      return this.view(current, userId);
+    }
+    await this.prisma.call.updateMany({
+      where: { id: callId, status: CallStatus.RINGING, deliveredAt: null },
+      data: { deliveredAt: new Date() },
+    });
+    return this.view(await this.ownedCall(userId, callId), userId);
+  }
+
   async reject(userId: string, callId: string) {
     const current = await this.ownedCall(userId, callId);
     if (current.calleeId !== userId) throw new ForbiddenException('Bạn không phải người nhận cuộc gọi này');
@@ -487,6 +509,7 @@ export class CallService {
       },
       end_reason: row.endReason,
       ringing_at: row.ringingAt.toISOString(),
+      delivered_at: row.deliveredAt?.toISOString() ?? null,
       accepted_at: row.acceptedAt?.toISOString() ?? null,
       ended_at: row.endedAt?.toISOString() ?? null,
       duration_sec: row.durationSec,
