@@ -131,7 +131,14 @@ export class NewsAiSummaryService {
         ...(topics.length ? { topic_slug: { type: 'string', enum: [...topics.map((topic) => topic.slug), NO_TOPIC] } } : {}),
       },
       required: ['title', 'short_summary', 'summary_lines', 'content', ...(topics.length ? ['topic_slug'] : [])],
-      additionalProperties: false,
+      /*
+        KHÔNG có `additionalProperties`: `responseSchema` của Gemini là một
+        tập con của OpenAPI và trả 400 "Unknown name additionalProperties"
+        cho cả request. Có trường đó thì bước biên tập chưa bao giờ chạy được
+        qua Gemini, chỉ âm thầm rơi sang DeepSeek (hoặc hỏng hẳn khi không có
+        khoá DeepSeek, như trên server). Trường thừa AI lỡ trả về thì phần
+        đọc kết quả bên dưới vốn đã bỏ qua.
+      */
     };
     const primary = process.env.LLM_PRIMARY_VENDOR?.toLowerCase() === 'deepseek' ? 'deepseek' : 'gemini';
     const fallback = process.env.LLM_FALLBACK_VENDOR?.toLowerCase() === 'gemini' ? 'gemini' : 'deepseek';

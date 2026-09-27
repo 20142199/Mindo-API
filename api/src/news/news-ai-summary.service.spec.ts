@@ -53,6 +53,8 @@ describe('NewsAiSummaryService', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('https://gemini.example.test/v1beta/models/summary-model:generateContent');
     expect(request.generationConfig.responseMimeType).toBe('application/json');
     expect(request.generationConfig.responseSchema.required).toEqual(['title', 'short_summary', 'summary_lines', 'content']);
+    // Gemini trả 400 "Unknown name additionalProperties" nếu schema có trường này.
+    expect(request.generationConfig.responseSchema).not.toHaveProperty('additionalProperties');
     expect(request.systemInstruction.parts[0].text).toContain('bản tin độc lập bằng tiếng Việt');
     expect(request.contents[0].parts[0].text).toContain('Market news');
   });
