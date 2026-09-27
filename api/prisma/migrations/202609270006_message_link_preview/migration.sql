@@ -1,0 +1,13 @@
+-- Thẻ xem trước của link dán trong tin nhắn.
+--
+-- Lưu KÈM TIN chứ không để mỗi máy tự tải lại lúc hiển thị. Ba lý do:
+--
+--   1. Mỗi link chỉ tải một lần, thay vì tải lại ở từng máy, từng lần cuộn qua.
+--   2. Ai xem cũng thấy giống nhau. Trang đổi tiêu đề sau đó thì tin nhắn
+--      vẫn giữ đúng thứ người gửi đã thấy lúc gửi.
+--   3. Không lộ IP người nhận cho trang đích. Để app tự tải nghĩa là bất cứ
+--      ai gửi được một link cũng biết được người kia đang ở đâu.
+--
+-- Json chứ không phải các cột rời: đây là ảnh chụp của bên thứ ba, không
+-- phải dữ liệu mình truy vấn. Không ai lọc tin nhắn theo `og:site_name`.
+ALTER TABLE "ChatMessage" ADD COLUMN "linkPreview" JSONB;

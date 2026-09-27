@@ -161,6 +161,12 @@ model User {
   passwordHash                 String
   fullName                     String
   nickname                     String?
+  /// Bản bỏ dấu + chữ thường của `fullName`, phục vụ tìm kiếm không dấu.
+  /// KHÔNG ghi từ code: trigger `user_search_sync` giữ nó đồng bộ ở mọi
+  /// đường ghi (migration 202609270002_search_normalized).
+  fullNameNormalized           String?
+  /// Như trên, cho `nickname`.
+  nicknameNormalized           String?
   referralCode                 String                 @unique @default(cuid())
   referredById                 String?
   phone                        String?
@@ -177,6 +183,11 @@ model User {
   emailNotifications           Boolean                @default(true)
   failedLoginAttempts          Int                    @default(0)
   loginLockedUntil             DateTime?
+  /// Lần cuối người này đóng socket chat cuối cùng — nguồn của "Hoạt động 5 phút trước".
+  /// Ở Postgres chứ không ở Redis: nó đọc kèm sẵn trong truy vấn thành viên hội thoại
+  /// nên không tốn roundtrip, và không bay mất khi Redis bị flush. Redis chỉ giữ đúng
+  /// một việc — "ngay lúc này có socket nào đang mở không".
+  lastSeenAt                   DateTime?
   role                         UserRole               @default(INVESTOR)
   status                       UserStatus             @default(ACTIVE)
   balanceVnd                   Decimal                @default(0) @db.Decimal(20, 0)
@@ -255,6 +266,8 @@ model Conversation {
   type          ConversationType
   directKey     String?              @unique
   title         String?
+  /// Bản bỏ dấu + chữ thường của `title` — xem `User.fullNameNormalized`.
+  titleNormalized String?
   avatarFileId  String?
   createdById   String
   lastMessageAt DateTime             @default(now())
@@ -296,6 +309,14 @@ model ChatMessage {
   clientMessageId       String?
   replyToId             String?
   quotedMessageSnapshot Json?
+  /// Ảnh chụp thẻ og: của link đầu tiên trong tin, lấy lúc GỬI.
+  /// Giữ nguyên kể cả khi trang đổi nội dung sau đó — xem migration
+  /// 202609270006_message_link_preview.
+  linkPreview           Json?
+  /// Số liệu cuộc gọi của một tin hệ thống loại "nhật ký cuộc gọi":
+  /// `{ call_id, call_type, status, duration_sec }`. Xem migration
+  /// 202609270007_message_call_info.
+  callInfo              Json?
   editedAt              DateTime?
   deletedAt             DateTime?
   createdAt             DateTime           @default(now())

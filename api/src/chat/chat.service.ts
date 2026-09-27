@@ -28,9 +28,9 @@ import {
   UpdateGroupConversationDto,
 } from './chat.dto';
 import { ChatPresenceService } from './chat-presence.service';
-import { directConversationKey, messagePreview } from './chat.domain';
+import { directConversationKey, messagePreview, searchKey } from './chat.domain';
 
-type BasicUser = Pick<User, 'id' | 'fullName' | 'nickname' | 'email' | 'phone' | 'avatarFileId'>;
+type BasicUser = Pick<User, 'id' | 'fullName' | 'nickname' | 'email' | 'phone' | 'avatarFileId' | 'lastSeenAt'>;
 
 const memberUserSelect = {
   id: true,
@@ -39,6 +39,7 @@ const memberUserSelect = {
   email: true,
   phone: true,
   avatarFileId: true,
+  lastSeenAt: true,
 } satisfies Prisma.UserSelect;
 
 const conversationInclude = {
@@ -125,14 +126,34 @@ export class ChatService {
     const where: Prisma.ConversationWhereInput = {
       deletedAt: null,
       members: { some: { userId, leftAt: null, isHidden: false } },
+      /* Tab "Tin nhắn" / "Nhóm" của màn tìm kiếm. Lọc ở đây chứ không ở app:
+         app chỉ cầm trang đầu, nên lọc bên đó là bỏ sót mọi hội thoại từ
+         trang hai trở đi. */
+      ...(query.type ? { type: query.type } : {}),
       ...(q ? {
+        /*
+          Tìm theo TÊN — tên nhóm hoặc tên thành viên. KHÔNG tìm nội dung tin.
+
+          So trên cột ĐÃ BỎ DẤU, nên "dau tu" và "Đầu tư" đều ra "Đầu tư dài
+          hạn". Không cần `mode: 'insensitive'` nữa: cả hai vế đều đã hạ chữ
+          thường, và `LIKE` thường thì dùng được index trigram, còn `ILIKE`
+          thì không.
+
+          Từng có mệnh đề thứ ba khớp `messages.content`. Nó trả về hội thoại
+          chứ không trả về tin khớp, mà màn hình không hiện đoạn trích nào —
+          người dùng gõ một chữ rồi thấy một hội thoại lạ nhảy ra, không có gì
+          giải thích vì sao nó ở đó. Nó cũng là mệnh đề đắt nhất: `ILIKE` quét
+          bảng tin nhắn, không có index full-text lẫn trigram.
+
+          Muốn tìm trong nội dung thì dựng lại tử tế — index hẳn hoi và trả về
+          TIN kèm đoạn trích, chứ không phải hội thoại chứa tin.
+        */
         OR: [
-          { title: { contains: q, mode: 'insensitive' } },
+          { titleNormalized: { contains: searchKey(q) } },
           { members: { some: { leftAt: null, user: { OR: [
-            { fullName: { contains: q, mode: 'insensitive' } },
-            { nickname: { contains: q, mode: 'insensitive' } },
+            { fullNameNormalized: { contains: searchKey(q) } },
+            { nicknameNormalized: { contains: searchKey(q) } },
           ] } } } },
-          { messages: { some: { deletedAt: null, content: { contains: q, mode: 'insensitive' } } } },
         ],
       } : {}),
     };
@@ -215,6 +236,12 @@ export class ChatService {
             clientMessageId: dto.client_message_id,
             replyToId: dto.reply_to_message_id,
             quotedMessageSnapshot: quoted ?? undefined,
+            /* Ảnh chụp thẻ og: lấy TẠI THỜI ĐIỂM GỬI. App tải trước lúc soạn
+               rồi gửi kèm, nên gửi tin không phải đợi một lượt mạng ra
+               Internet — xem `GET chat/link-preview`. */
+            linkPreview: dto.link_preview
+              ? ({ ...dto.link_preview } as Prisma.InputJsonObject)
+              : undefined,
             attachments: attachmentRows.length ? this.attachmentSnapshots(attachmentRows) : undefined,
           },
           include: { sender: { select: memberUserSelect } },
@@ -376,18 +403,65 @@ export class ChatService {
     return { conversation_id: conversationId, hidden: true };
   }
 
+  /**
+   * Đổi tên và / hoặc ảnh nhóm.
+   *
+   * Cả hai đều là thứ CHUNG: sửa một lần là cả nhóm thấy, khác hẳn tên gợi nhớ
+   * và ảnh liên hệ ở luồng 1-1 (`Friendship.alias` / `Friendship.avatarFileId`)
+   * vốn chỉ mình chủ hàng thấy. Vì thế `assertManager`, và vì thế có tin hệ
+   * thống — đứng cùng hàng với thêm / xoá / rời thành viên.
+   *
+   * `titleNormalized` KHÔNG xuất hiện ở đây: trigger `conversation_search_sync`
+   * lo cột đó ngay trong CSDL, nên mọi đường ghi `title` đều khớp. Ghi thêm ở
+   * đây là hai nơi cùng ghi một cột.
+   */
   async updateGroup(userId: string, conversationId: string, dto: UpdateGroupConversationDto) {
-    await this.assertManager(userId, conversationId);
-    if (!dto.title && !dto.avatar_file_id) throw new BadRequestException('Không có thông tin nhóm cần cập nhật');
+    const { group } = await this.assertManager(userId, conversationId);
+    /* Xét `undefined` chứ không xét truthy: `avatar_file_id: null` là "xoá ảnh
+       nhóm" — một Ý ĐỊNH — còn không gửi khoá đó mới là "để nguyên". Bản cũ
+       gộp hai thứ vào một rổ, nên không có đường nào xoá được ảnh. */
+    const titleGiven = dto.title !== undefined;
+    const avatarGiven = dto.avatar_file_id !== undefined;
+    if (!titleGiven && !avatarGiven) throw new BadRequestException('Không có thông tin nhóm cần cập nhật');
     if (dto.avatar_file_id) {
       const avatar = await this.files.assertOwned(userId, dto.avatar_file_id);
       if (!avatar.mimeType.startsWith('image/')) throw new BadRequestException('Ảnh nhóm phải là tệp hình ảnh');
     }
+    const nextAvatarFileId = dto.avatar_file_id ?? null;
+    const titleChanged = titleGiven && dto.title !== group.title;
+    const avatarChanged = avatarGiven && nextAvatarFileId !== group.avatarFileId;
     await this.prisma.conversation.update({
       where: { id: conversationId },
-      data: { ...(dto.title ? { title: dto.title } : {}), ...(dto.avatar_file_id ? { avatarFileId: dto.avatar_file_id } : {}) },
+      data: {
+        ...(titleGiven ? { title: dto.title } : {}),
+        ...(avatarGiven ? { avatarFileId: nextAvatarFileId } : {}),
+      },
     });
-    return this.getConversation(userId, conversationId);
+    /* Không có gì đổi thì không có gì để kể: bấm Lưu mà không sửa gì cũng
+       không được đẩy một dòng rác vào khung chat. */
+    const systemMessage = titleChanged || avatarChanged
+      ? await this.createSystemMessage(
+        userId,
+        conversationId,
+        `${await this.userName(userId)} đã ${this.groupIdentityNotice(titleChanged ? dto.title! : null, avatarChanged ? nextAvatarFileId : undefined)}`,
+      )
+      : null;
+    return { ...(await this.getConversation(userId, conversationId)), system_message: systemMessage };
+  }
+
+  /**
+   * Phần đuôi của tin hệ thống khi tên hoặc ảnh nhóm đổi.
+   *
+   * Đổi cả hai cùng lúc thì GỘP một câu chứ không bắn hai tin: với người dùng
+   * đó là MỘT lần bấm Lưu, và hai dòng liền nhau kể cùng một việc thì chỉ làm
+   * khung chat rụt rịt.
+   *
+   * `nextAvatarFileId`: `undefined` = ảnh không đổi, `null` = vừa xoá ảnh.
+   */
+  private groupIdentityNotice(title: string | null, nextAvatarFileId: string | null | undefined) {
+    const avatarPart = nextAvatarFileId === undefined ? null : nextAvatarFileId === null ? 'xoá ảnh nhóm' : 'đổi ảnh nhóm';
+    const titlePart = title === null ? null : `đổi tên nhóm thành "${title}"`;
+    return [titlePart, avatarPart].filter(Boolean).join(' và ');
   }
 
   async addMembers(userId: string, conversationId: string, dto: AddGroupMembersDto) {
@@ -407,7 +481,7 @@ export class ChatService {
   }
 
   async removeMember(userId: string, conversationId: string, memberUserId: string) {
-    const actor = await this.assertManager(userId, conversationId);
+    const { member: actor } = await this.assertManager(userId, conversationId);
     if (memberUserId === userId) return this.leaveGroup(userId, conversationId);
     const target = await this.assertMembership(memberUserId, conversationId);
     if (target.role === ConversationMemberRole.OWNER) throw new ForbiddenException('Không thể xóa chủ nhóm');
@@ -472,6 +546,28 @@ export class ChatService {
     const rows = await this.prisma.conversationMember.findMany({
       where: { conversationId, leftAt: null },
       select: { userId: true },
+    });
+    return rows.map((row) => row.userId);
+  }
+
+  /**
+   * Mọi người có chung ít nhất một hội thoại chưa xoá với `userId`.
+   *
+   * Đây là tập người CẦN BIẾT khi người này vào hay rời mạng — chính là
+   * những người có `userId` xuất hiện trong danh sách hội thoại của họ.
+   *
+   * Một truy vấn cho mỗi lần vào/rời mạng. Rẻ hơn hẳn `typing:start`, vốn
+   * chạy hai truy vấn mỗi lần gõ phím.
+   */
+  async getPeerUserIds(userId: string) {
+    const rows = await this.prisma.conversationMember.findMany({
+      where: {
+        leftAt: null,
+        userId: { not: userId },
+        conversation: { deletedAt: null, members: { some: { userId, leftAt: null } } },
+      },
+      select: { userId: true },
+      distinct: ['userId'],
     });
     return rows.map((row) => row.userId);
   }
@@ -567,7 +663,10 @@ export class ChatService {
     if (!managerRoles.includes(member.role)) {
       throw new ForbiddenException('Bạn không có quyền quản lý nhóm');
     }
-    return member;
+    /* Trả luôn hàng hội thoại vừa đọc: `updateGroup` cần tên và ảnh HIỆN TẠI
+       để biết có gì thật sự đổi hay không, và đọc lại đúng hàng đó lần thứ hai
+       trong cùng một lượt xử lý là việc không cần làm. */
+    return { member, group };
   }
 
   private async assertFriend(userId: string, friendUserId: string) {
@@ -709,7 +808,22 @@ export class ChatService {
         title,
         avatar_url: avatar,
         member_count: row.members.length,
+        /*
+          Id NGƯỜI KIA của hội thoại 1-1, null với nhóm.
+
+          `peer` đã có sẵn ngay trên đây để dựng tiêu đề và ảnh, nên gửi kèm
+          id của họ không tốn thêm truy vấn nào. Thiếu trường này thì app
+          không có cách nào biết dòng hội thoại thuộc về ai: mảng `members`
+          chỉ đi cùng `GET /conversations/:id`, còn danh sách thì không.
+        */
+        peer_user_id: row.type === ConversationType.DIRECT ? peer?.userId ?? null : null,
         is_online: row.type === ConversationType.DIRECT ? Boolean(peer && online.get(peer.userId)) : false,
+        /*
+          Mốc lần cuối người kia online, ISO — nguồn của "Hoạt động 5 phút
+          trước". `null` với nhóm (nhóm hai mươi người thì mốc đó là của ai)
+          và với người chưa từng mở socket chat bao giờ.
+        */
+        last_seen_at: row.type === ConversationType.DIRECT ? peer?.user.lastSeenAt?.toISOString() ?? null : null,
         is_muted: ownMember.isMuted,
         unread_count: unreadCount,
         last_message: lastMessage ? {
@@ -776,6 +890,11 @@ export class ChatService {
       is_own: row.senderId === userId,
       message_type: row.type,
       content: row.deletedAt ? null : row.content,
+      /* Thu hồi rồi thì thẻ cũng biến mất — giữ lại là giữ đúng cái nội dung
+         người ta vừa bảo xoá đi. */
+      link_preview: row.deletedAt ? null : row.linkPreview ?? null,
+      /* Nhật ký cuộc gọi — chỉ tin hệ thống loại đó mới có. */
+      call_info: row.callInfo ?? null,
       attachments: row.deletedAt ? [] : attachments,
       reply_to_message_id: row.replyToId,
       quoted_message: row.quotedMessageSnapshot,
@@ -793,6 +912,7 @@ export class ChatService {
       full_name: user.fullName,
       nickname: user.nickname ?? user.fullName,
       avatar_url: this.fileUrl(user.avatarFileId, files),
+      last_seen_at: user.lastSeenAt?.toISOString() ?? null,
     };
   }
 

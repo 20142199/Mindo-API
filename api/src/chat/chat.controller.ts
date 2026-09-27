@@ -22,6 +22,7 @@ import {
   AddGroupMembersDto,
   ChatMessageQueryDto,
   ChatPageQueryDto,
+  LinkPreviewQueryDto,
   CreateChatMessageDto,
   CreateGroupConversationDto,
   EditChatMessageDto,
@@ -32,6 +33,7 @@ import {
 } from './chat.dto';
 import { ChatRealtimeService } from './chat-realtime.service';
 import { ChatService } from './chat.service';
+import { ChatLinkPreviewService } from './chat-link-preview.service';
 
 @ApiTags('Investor messaging')
 @ApiBearerAuth()
@@ -42,7 +44,22 @@ export class ChatController {
     private readonly chat: ChatService,
     private readonly realtime: ChatRealtimeService,
     private readonly files: FileStorageService,
+    private readonly linkPreviews: ChatLinkPreviewService,
   ) {}
+
+  /**
+   * Đọc thẻ xem trước của một link — app gọi lúc SOẠN, rồi gửi kèm tin.
+   *
+   * Luôn trả 200. Link chết, trang chặn bot, tên miền không tồn tại đều là
+   * chuyện thường ngày; trả lỗi ở đây chỉ khiến ô soạn tin nháy một thông
+   * báo đỏ cho thứ người dùng không làm gì sai. Không đọc được thì `data`
+   * là `null` và app gửi tin như chữ thường.
+   */
+  @Get('link-preview')
+  async linkPreview(@Query() query: LinkPreviewQueryDto) {
+    const data = await this.linkPreviews.fetchPreview(query.url);
+    return ok(data, data ? 'Thành công' : 'Không đọc được xem trước');
+  }
 
   @Get('conversations')
   async conversations(@Req() req: AuthenticatedRequest, @Query() query: ChatPageQueryDto) {
@@ -127,6 +144,11 @@ export class ChatController {
   ) {
     const data = await this.chat.updateGroup(authUser(req).id, conversationId, dto);
     await this.realtime.publishConversation(conversationId);
+    /* Bấm Lưu mà không sửa gì thì `updateGroup` bỏ trống tin hệ thống — xem
+       chú thích ở đó. */
+    if (data.system_message) {
+      this.realtime.publishSystemMessage(conversationId, data.system_message);
+    }
     return ok(data, 'Đã cập nhật nhóm');
   }
 

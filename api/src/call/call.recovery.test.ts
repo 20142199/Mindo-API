@@ -9,6 +9,7 @@ import { CallSignalingService } from './call-signaling.service';
 import { PushNotificationService } from '../notification/push-notification.service';
 import { CallClient } from './call.dto';
 import { CallService } from './call.service';
+import { CallChatLogService } from './call-chat-log.service';
 
 /**
  * Safety net for the ringing-timeout recovery WIRING (2026-09-24).
@@ -98,6 +99,10 @@ function buildService(row: ReturnType<typeof ringingCall>) {
     /* Push đã được thêm vào service sau khi bộ test này ra đời. Nó không nằm
        trong đường đi nào ở đây, nên chỉ cần một bản rỗng để dựng được. */
     { notifyIncomingCall: vi.fn(() => Promise.resolve()) } as unknown as PushNotificationService,
+    /* Nhật ký cuộc gọi trong chat — thêm sau bộ test này. Nó chạy ngoài
+       luồng (`void`) và không nằm trong đường đi nào ở đây, nên chỉ cần một
+       bản rỗng để dựng được. */
+    { record: vi.fn(() => Promise.resolve()) } as unknown as CallChatLogService,
     { add: vi.fn(() => Promise.resolve({ id: 'job' })) } as unknown as Queue<{ callId: string }>,
   );
 

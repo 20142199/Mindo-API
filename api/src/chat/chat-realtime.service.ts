@@ -36,6 +36,8 @@ export class ChatRealtimeService implements OnModuleDestroy {
       transports: ['websocket', 'polling'],
     });
     await this.configureRedisAdapter();
+    /* Quét socket mà những lần chạy trước bỏ lại — xem `ChatPresenceService.start`. */
+    await this.presence.start();
     const namespace = this.io.of('/chat');
     this.namespace = namespace;
     namespace.use(async (socket, next) => {
@@ -165,7 +167,7 @@ export class ChatRealtimeService implements OnModuleDestroy {
   private bindSocket(socket: Socket) {
     const { userId } = socket.data as ChatSocketData;
     void socket.join(this.userRoom(userId));
-    void this.presence.connect(userId, socket.id);
+    void this.announceArrival(userId, socket.id);
 
     socket.on('channel:join', async (payload: unknown, ack?: Ack) => {
       await this.handle(socket, 'channel:join', ack, async () => {
@@ -193,6 +195,7 @@ export class ChatRealtimeService implements OnModuleDestroy {
           attachments: dto.attachments?.map((item) => ({ file_id: item.fileId })),
           client_message_id: dto.clientMessageId,
           reply_to_message_id: dto.replyToMessageId,
+          link_preview: dto.linkPreview,
         });
         if (!result.duplicate) await this.publishNewMessage(dto.channelId, result.message);
         return {
@@ -263,8 +266,58 @@ export class ChatRealtimeService implements OnModuleDestroy {
     }
 
     socket.on('disconnect', () => {
-      void this.presence.disconnect(userId, socket.id);
+      void this.announceDeparture(userId, socket.id);
     });
+  }
+
+  /**
+   * Báo cho bạn bè biết người này vừa vào mạng.
+   *
+   * Chỉ báo ở socket ĐẦU TIÊN: mở thêm iPad trong lúc điện thoại vẫn mở thì
+   * không có gì mới để nói.
+   */
+  private async announceArrival(userId: string, socketId: string) {
+    const first = await this.presence.connect(userId, socketId).catch(() => false);
+    if (first) await this.announcePresence(userId, true, null);
+  }
+
+  /**
+   * Báo cho bạn bè biết người này vừa rời mạng, kèm mốc lần cuối.
+   *
+   * Không có khoảng ân hạn: tắt socket là offline ngay. Phía app, mốc dưới
+   * một tiếng vẫn vẽ chấm (màu khác) nên nhịp chớp lúc thu app xuống nền
+   * không lộ ra thành "biến mất".
+   */
+  private async announceDeparture(userId: string, socketId: string) {
+    try {
+      const { wasLast, lastSeenAt } = await this.presence.disconnect(userId, socketId);
+      if (wasLast) await this.announcePresence(userId, false, lastSeenAt);
+    } catch (error) {
+      this.logger.warn(`Không xử lý được lúc ngắt kết nối của ${userId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Phát `presence:updated` vào phòng riêng của từng người quen.
+   *
+   * Bọc try/catch: một lần fan-out hỏng không được kéo đổ vòng đời socket —
+   * người ta vẫn phải vào phòng và nhắn tin được bình thường.
+   */
+  private async announcePresence(userId: string, isOnline: boolean, lastSeenAt: string | null) {
+    try {
+      const peerIds = await this.chat.getPeerUserIds(userId);
+      if (!peerIds.length) return;
+      /* `this.namespace` chứ KHÔNG phải `this.io`: client nối vào `/chat`,
+         còn `this.io` là namespace gốc — bắn vào đó là bắn vào chỗ không có
+         ai, im lặng, không lỗi. Mọi broadcast khác trong tệp này cũng vậy. */
+      this.namespace?.to(peerIds.map((id) => this.userRoom(id))).emit('presence:updated', {
+        user_id: userId,
+        is_online: isOnline,
+        last_seen_at: lastSeenAt,
+      });
+    } catch (error) {
+      this.logger.warn(`Không phát được presence của ${userId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   private async configureRedisAdapter() {
