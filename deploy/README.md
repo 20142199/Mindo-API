@@ -79,6 +79,17 @@ docker compose \
 
 Sau đó cài hai file trong `deploy/host-nginx/` vào `/etc/nginx/sites-available/`, tạo symlink tương ứng trong `/etc/nginx/sites-enabled/`, chạy `nginx -t` rồi reload Nginx. API nghe tại `127.0.0.1:4010`, Admin tại `127.0.0.1:4011`; chỉ Nginx hệ thống nhận traffic Internet.
 
+Kiểm bắt tay WebSocket sau khi reload — **đừng bỏ bước này**. Thiếu nâng cấp WebSocket thì REST vẫn chạy hoàn hảo nên trông như mọi thứ đều ổn, trong khi app im lặng mất hết realtime: tin nhắn không tới, trạng thái online sai, và cuộc gọi không đổ chuông. App khai `transports: ['websocket']` nên không có đường lùi sang long-polling.
+
+```bash
+curl -i -H 'Host: api-mindo.stg-studio.com' \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  'http://127.0.0.1/socket.io/?EIO=4&transport=websocket'
+```
+
+Phải trả về `101 Switching Protocols`. Trả về `200` hoặc `400` là Nginx đang không chuyển tiếp nâng cấp. (Token xác thực không cần ở đây: nâng cấp xảy ra ở tầng vận chuyển, trước khi namespace `/chat` kiểm token.)
+
 ## Lưu ý bảo mật
 
 Flexible chỉ mã hóa từ người dùng đến Cloudflare; đoạn Cloudflare → origin vẫn là HTTP. Với hệ thống có đăng nhập và eKYC, nên chuyển sang Full (strict) cùng Cloudflare Origin Certificate khi có thể, đồng thời giới hạn firewall origin chỉ nhận traffic từ Cloudflare.
