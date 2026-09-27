@@ -8,10 +8,16 @@ export type AiGenerateOptions = {
   targetLanguage?: string;
   history?: AiContextMessage[];
   attachment?: AiInputFile;
+  signal?: AbortSignal;
+  onDelta?: (content: string) => Promise<void>;
 };
 type AiVendor = 'gemini' | 'deepseek';
 type TokenUsage = { inputTokens: number; outputTokens: number; totalTokens: number };
-type AiResult = { content: string; attachmentUrl?: string; metadata?: Record<string, unknown> };
+type AiResult = {
+  content: string;
+  attachmentData?: { content: Buffer; mimeType: string; filename: string };
+  metadata?: Record<string, unknown>;
+};
 type ProviderTextResult = { content: string; vendor: AiVendor; model: string; usage: TokenUsage };
 
 class VendorError extends Error {
@@ -22,8 +28,12 @@ class VendorError extends Error {
 export class AiProviderService {
   async generate(expert: AiExpert, kind: AiMessageKind, input: string, options: AiGenerateOptions = {}): Promise<AiResult> {
     const startedAt = Date.now();
-    if (process.env.AI_MOCK !== 'false') return this.mock(expert, kind, input, options, startedAt);
-    if (kind === AiMessageKind.IMAGE) return this.generateGeminiImage(input, startedAt);
+    if (process.env.AI_MOCK !== 'false') {
+      const result = this.mock(expert, kind, input, options, startedAt);
+      if (kind !== AiMessageKind.IMAGE) await options.onDelta?.(result.content);
+      return result;
+    }
+    if (kind === AiMessageKind.IMAGE) return this.generateGeminiImage(input, startedAt, options.signal);
 
     const taskInstruction = kind === AiMessageKind.TRANSLATION
       ? `Dịch nội dung từ ${options.sourceLanguage ?? 'ngôn ngữ tự động nhận diện'} sang ${options.targetLanguage ?? 'Tiếng Việt'}. Chỉ trả về bản dịch.`
@@ -42,7 +52,7 @@ export class AiProviderService {
           ? await this.completeGemini(systemPrompt, input, options)
           : await this.completeDeepSeek(systemPrompt, input, options);
         const specific = kind === AiMessageKind.DOCUMENT
-          ? { filename: 'tai-lieu-mindo.md', mime_type: 'text/markdown', size: Buffer.byteLength(generated.content), credits: 1 }
+          ? { filename: 'tai-lieu-mindo.docx', mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', credits: 1 }
           : kind === AiMessageKind.TRANSLATION
             ? { source_language: options.sourceLanguage ?? 'auto', target_language: options.targetLanguage, character_count: input.length, credits: 1 }
             : { credits: 1 };
@@ -61,6 +71,7 @@ export class AiProviderService {
           },
         };
       } catch (error) {
+        if (options.signal?.aborted) throw error;
         lastError = error instanceof VendorError ? error : new VendorError(vendor, null, error instanceof Error ? error.message : 'Unknown provider error');
         // DeepSeek không được phép nhận một lượt có file rồi giả vờ xử lý text-only.
         if (options.attachment) break;
@@ -103,10 +114,11 @@ export class AiProviderService {
         maxOutputTokens: Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 2_048),
       },
     };
-    const response = await this.request(vendor, `${baseUrl}/models/${model}:generateContent`, {
+    const response = await this.request(vendor, `${baseUrl}/models/${model}:${options.onDelta ? 'streamGenerateContent?alt=sse' : 'generateContent'}`, {
       'content-type': 'application/json',
       'x-goog-api-key': apiKey,
-    }, body);
+    }, body, options.signal);
+    if (options.onDelta) return this.readGeminiStream(response, vendor, model, options.onDelta);
     const data = await response.json() as {
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
       usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number; totalTokenCount?: number };
@@ -139,7 +151,9 @@ export class AiProviderService {
       messages: [{ role: 'system', content: systemPrompt }, ...history, { role: 'user', content: input }],
       temperature: Number(process.env.AI_TEMPERATURE ?? 0.4),
       max_tokens: Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 2_048),
-    });
+      ...(options.onDelta ? { stream: true, stream_options: { include_usage: true } } : {}),
+    }, options.signal);
+    if (options.onDelta) return this.readDeepSeekStream(response, vendor, model, options.onDelta);
     const data = await response.json() as {
       model?: string;
       choices?: Array<{ message?: { content?: string } }>;
@@ -157,7 +171,7 @@ export class AiProviderService {
     };
   }
 
-  private async generateGeminiImage(input: string, startedAt: number): Promise<AiResult> {
+  private async generateGeminiImage(input: string, startedAt: number, signal?: AbortSignal): Promise<AiResult> {
     const vendor: AiVendor = 'gemini';
     const apiKey = process.env.GEMINI_API_KEY?.trim();
     if (!apiKey) throw new ServiceUnavailableException({ message: 'Chưa cấu hình Gemini để tạo ảnh', code: 'GEMINI_NOT_CONFIGURED' });
@@ -171,7 +185,7 @@ export class AiProviderService {
       }, {
         contents: [{ role: 'user', parts: [{ text: input }] }],
         generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
-      });
+      }, signal);
     } catch (error) {
       const status = error instanceof VendorError ? error.status : null;
       throw new ServiceUnavailableException({ message: 'Gemini chưa thể tạo ảnh', code: 'GEMINI_IMAGE_FAILED', provider_status: status });
@@ -189,7 +203,11 @@ export class AiProviderService {
     const outputTokens = (data.usageMetadata?.candidatesTokenCount ?? 0) + (data.usageMetadata?.thoughtsTokenCount ?? 0);
     return {
       content: 'Ảnh đã được tạo theo yêu cầu.',
-      attachmentUrl: `data:${mimeType};base64,${bytes}`,
+      attachmentData: {
+        content: Buffer.from(bytes, 'base64'),
+        mimeType,
+        filename: `mindo-ai-${Date.now()}.${this.imageExtension(mimeType)}`,
+      },
       metadata: {
         vendor,
         model,
@@ -205,16 +223,19 @@ export class AiProviderService {
     };
   }
 
-  private async request(vendor: AiVendor, url: string, headers: Record<string, string>, body: unknown) {
+  private async request(vendor: AiVendor, url: string, headers: Record<string, string>, body: unknown, signal?: AbortSignal) {
     let response: Response;
     try {
       response = await fetch(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS ?? 60_000)),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS ?? 60_000))])
+          : AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS ?? 60_000)),
       });
-    } catch {
+    } catch (error) {
+      if (signal?.aborted) throw error;
       throw new VendorError(vendor, null, `${vendor} connection failed`);
     }
     if (!response.ok) throw new VendorError(vendor, response.status, `${vendor} HTTP ${response.status}`);
@@ -230,15 +251,112 @@ export class AiProviderService {
     return Number.isInteger(value) && value > 0 ? Math.min(value, 100) : 20;
   }
 
+  private async readGeminiStream(
+    response: Response,
+    vendor: AiVendor,
+    model: string,
+    onDelta: (content: string) => Promise<void>,
+  ): Promise<ProviderTextResult> {
+    let content = '';
+    let finishReason = 'unknown';
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let totalTokens = 0;
+    await this.readSse(response, async (payload) => {
+      const data = JSON.parse(payload) as {
+        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
+        usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number; totalTokenCount?: number };
+      };
+      const chunk = (data.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? '').join('');
+      finishReason = data.candidates?.[0]?.finishReason ?? finishReason;
+      inputTokens = data.usageMetadata?.promptTokenCount ?? inputTokens;
+      outputTokens = data.usageMetadata
+        ? (data.usageMetadata.candidatesTokenCount ?? 0) + (data.usageMetadata.thoughtsTokenCount ?? 0)
+        : outputTokens;
+      totalTokens = data.usageMetadata?.totalTokenCount ?? totalTokens;
+      if (chunk) {
+        content += chunk;
+        await onDelta(content);
+      }
+    });
+    content = content.trim();
+    if (!content) throw new VendorError(vendor, response.status, `Gemini empty response (${finishReason})`);
+    return { content, vendor, model, usage: { inputTokens, outputTokens, totalTokens: totalTokens || inputTokens + outputTokens } };
+  }
+
+  private async readDeepSeekStream(
+    response: Response,
+    vendor: AiVendor,
+    fallbackModel: string,
+    onDelta: (content: string) => Promise<void>,
+  ): Promise<ProviderTextResult> {
+    let content = '';
+    let model = fallbackModel;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let totalTokens = 0;
+    await this.readSse(response, async (payload) => {
+      if (payload === '[DONE]') return;
+      const data = JSON.parse(payload) as {
+        model?: string;
+        choices?: Array<{ delta?: { content?: string } }>;
+        usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+      };
+      model = data.model ?? model;
+      inputTokens = data.usage?.prompt_tokens ?? inputTokens;
+      outputTokens = data.usage?.completion_tokens ?? outputTokens;
+      totalTokens = data.usage?.total_tokens ?? totalTokens;
+      const chunk = data.choices?.[0]?.delta?.content ?? '';
+      if (chunk) {
+        content += chunk;
+        await onDelta(content);
+      }
+    });
+    content = content.trim();
+    if (!content) throw new VendorError(vendor, response.status, 'DeepSeek empty response');
+    return { content, vendor, model, usage: { inputTokens, outputTokens, totalTokens: totalTokens || inputTokens + outputTokens } };
+  }
+
+  private async readSse(response: Response, onData: (payload: string) => Promise<void>) {
+    if (!response.body) throw new Error('AI provider returned an empty stream');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      pending += decoder.decode(value, { stream: !done });
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (payload) await onData(payload);
+      }
+      if (done) break;
+    }
+    const trailing = pending.trim();
+    if (trailing.startsWith('data:')) await onData(trailing.slice(5).trim());
+  }
+
+  private imageExtension(mimeType: string) {
+    if (mimeType === 'image/jpeg') return 'jpg';
+    if (mimeType === 'image/webp') return 'webp';
+    return 'png';
+  }
+
   private mock(expert: AiExpert, kind: AiMessageKind, input: string, options: AiGenerateOptions, startedAt: number): AiResult {
     const common = { vendor: 'mock', model: 'mindo-local-mock', credits: 1, input_tokens: 0, output_tokens: 0, total_tokens: 0, duration_ms: Date.now() - startedAt, fallback_used: false };
     if (kind === AiMessageKind.IMAGE) {
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><rect width="1024" height="1024" fill="#e8f0fe"/><rect x="96" y="96" width="832" height="832" rx="48" fill="#174ea6"/><text x="512" y="475" text-anchor="middle" fill="white" font-family="Arial" font-size="76" font-weight="700">Mindo AI</text><text x="512" y="565" text-anchor="middle" fill="#dbe8ff" font-family="Arial" font-size="30">Bản xem trước cục bộ</text></svg>`;
-      return { content: `Bản xem trước ảnh cho yêu cầu: ${input}`, attachmentUrl: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`, metadata: { ...common, width: 1024, height: 1024 } };
+      return {
+        content: `Bản xem trước ảnh cho yêu cầu: ${input}`,
+        attachmentData: { content: Buffer.from(svg), mimeType: 'image/svg+xml', filename: `mindo-ai-${Date.now()}.svg` },
+        metadata: { ...common, width: 1024, height: 1024 },
+      };
     }
     if (kind === AiMessageKind.DOCUMENT) {
       const content = `# Tài liệu Mindo\n\n## Yêu cầu\n${input}\n\n## Nội dung đề xuất\nĐây là bản tài liệu mẫu được tạo trong chế độ phát triển.`;
-      return { content, metadata: { ...common, filename: 'tai-lieu-mindo.md', mime_type: 'text/markdown', size: Buffer.byteLength(content) } };
+      return { content, metadata: { ...common, filename: 'tai-lieu-mindo.docx', mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } };
     }
     if (kind === AiMessageKind.TRANSLATION) {
       return { content: `[Bản dịch ${options.targetLanguage ?? 'Tiếng Việt'}] ${input}`, metadata: { ...common, source_language: options.sourceLanguage ?? 'auto', target_language: options.targetLanguage, character_count: input.length } };

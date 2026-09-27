@@ -41,7 +41,7 @@ export class Phase2Controller {
   experts(@Query('q') search?: string) { return this.ai.experts(true, search).then((data) => ok(data)); }
 
   @Get('ai/config')
-  aiConfig() { return ok(this.ai.config()); }
+  aiConfig() { return this.ai.config().then((data) => ok(data)); }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Post('investor/agency/applications')
   apply(@Req() req: AuthenticatedRequest, @Body() dto: CreateAgencyApplicationDto) {
@@ -114,6 +114,11 @@ export class Phase2Controller {
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Post('investor/ai/messages/:id/retry')
   retryMessage(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
     return this.ai.retryMessage(authUser(req).id, id).then((data) => ok(data, 'Đang thử lại yêu cầu AI'));
+  }
+
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Post('investor/ai/messages/:id/stop')
+  stopMessage(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+    return this.ai.stopMessage(authUser(req).id, id).then((data) => ok(data, 'Đã dừng phản hồi AI'));
   }
 
   /**

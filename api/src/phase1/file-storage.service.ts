@@ -27,15 +27,26 @@ export class FileStorageService {
     if (!allowedMimeTypes.has(file.mimetype)) throw new BadRequestException('Định dạng file không được hỗ trợ');
     if (file.size > 10 * 1024 * 1024) throw new BadRequestException('File không được vượt quá 10 MB');
 
-    const extension = path.extname(file.originalname).toLowerCase().replace(/[^a-z0-9.]/g, '').slice(0, 10);
+    return this.saveBuffer(ownerId, file.originalname, file.mimetype, file.buffer);
+  }
+
+  async saveGenerated(ownerId: string, originalName: string, mimeType: string, content: Buffer) {
+    const allowed = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml']);
+    if (!allowed.has(mimeType)) throw new BadRequestException('Định dạng file AI không được hỗ trợ');
+    if (content.length > 10 * 1024 * 1024) throw new BadRequestException('File AI không được vượt quá 10 MB');
+    return this.saveBuffer(ownerId, originalName, mimeType, content);
+  }
+
+  private async saveBuffer(ownerId: string, originalName: string, mimeType: string, content: Buffer) {
+    const extension = path.extname(originalName).toLowerCase().replace(/[^a-z0-9.]/g, '').slice(0, 10);
     const storedName = `${randomUUID()}${extension}`;
     const ownerDir = path.join(this.baseDir, ownerId);
     const target = path.join(ownerDir, storedName);
     await mkdir(ownerDir, { recursive: true });
-    await writeFile(target, file.buffer, { flag: 'wx' });
+    await writeFile(target, content, { flag: 'wx' });
     try {
       const row = await this.prisma.fileUpload.create({
-        data: { ownerId, originalName: file.originalname.slice(0, 255), storedName, mimeType: file.mimetype, size: file.size },
+        data: { ownerId, originalName: originalName.slice(0, 255), storedName, mimeType, size: content.length },
       });
       return this.view(row);
     } catch (error) {

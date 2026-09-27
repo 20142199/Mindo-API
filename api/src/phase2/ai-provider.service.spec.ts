@@ -98,7 +98,8 @@ describe('AiProviderService', () => {
 
     const result = await new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'Một căn nhà màu xanh');
 
-    expect(result.attachmentUrl).toBe('data:image/png;base64,aW1hZ2U=');
+    expect(result.attachmentData).toMatchObject({ mimeType: 'image/png' });
+    expect(result.attachmentData?.content.toString()).toBe('image');
     expect(result.metadata).toMatchObject({ vendor: 'gemini', model: 'gemini-image-test', input_tokens: 2, output_tokens: 4 });
   });
 
@@ -130,5 +131,29 @@ describe('AiProviderService', () => {
     expect(result.content).toContain('Mindo Finance');
     expect(result.metadata).toMatchObject({ vendor: 'mock', model: 'mindo-local-mock' });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('streams accumulated Gemini text to the caller', async () => {
+    process.env.AI_MOCK = 'false';
+    process.env.GEMINI_API_KEY = 'gemini-key';
+    const stream = [
+      `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: 'Xin ' }] } }] })}\n\n`,
+      `data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text: 'chào' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 2, totalTokenCount: 4 } })}\n\n`,
+    ].join('');
+    const fetchMock = vi.fn().mockResolvedValue(new Response(stream, {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const deltas: string[] = [];
+
+    const result = await new AiProviderService().generate(expert, AiMessageKind.CHAT, 'Chào', {
+      onDelta: async (content) => { deltas.push(content); },
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toContain(':streamGenerateContent?alt=sse');
+    expect(deltas).toEqual(['Xin ', 'Xin chào']);
+    expect(result.content).toBe('Xin chào');
+    expect(result.metadata).toMatchObject({ total_tokens: 4 });
   });
 });

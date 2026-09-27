@@ -51,7 +51,7 @@ export class ResetAdminPasswordDto {
 }
 
 export class CreateAiConversationDto {
-  @IsString() expert_id!: string;
+  @IsOptional() @IsString() expert_id?: string;
   @IsOptional() @IsString() title?: string;
 }
 
@@ -66,6 +66,8 @@ export class CreateAiConversationDto {
 export class AiConversationQueryDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) page = 1;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(50) limit = 20;
+  @IsOptional() @IsString() @MaxLength(120) q?: string;
+  @IsOptional() @IsEnum(AiMessageKind) kind?: AiMessageKind;
 }
 
 export class AiMessageQueryDto {

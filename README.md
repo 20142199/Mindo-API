@@ -67,7 +67,7 @@ Each agency package is listed at 25 USD and converted to VND with an exchange ra
 
 ## Phase 2 — AI experts
 
-AI messages are created with a pending assistant response and processed by the `ai-response` Redis queue. Conversation events are available over SSE. Supported task types are `CHAT`, `IMAGE`, `DOCUMENT`, and `TRANSLATION`. Generated Markdown documents have a protected download endpoint. The complete mobile contract, including search, paginated history, private attachments, usage metadata, and failed-message retry, is documented in [`docs/ai-chat-api.md`](docs/ai-chat-api.md).
+AI messages are created with a pending assistant response and processed by the `ai-response` Redis queue. Conversation events stream partial content over SSE and pending responses can be stopped by the user. Supported task types are `CHAT`, `IMAGE`, `DOCUMENT`, and `TRANSLATION`. Generated images use private signed file URLs, Word documents have a protected DOCX download endpoint, and daily usage grows with the user's internal Peer holdings. The complete mobile contract, including search, paginated history, private attachments, usage metadata, and failed-message retry, is documented in [`docs/ai-chat-api.md`](docs/ai-chat-api.md).
 
 `AI_MOCK=true` is the safe local default. Production follows the Greenland provider strategy: Gemini Native is primary, DeepSeek Chat is the text fallback, and Gemini handles multimodal files and image generation. Set `GEMINI_API_KEY` and optionally `DEEPSEEK_API_KEY`; BullMQ retries provider errors and only marks the assistant message as failed after the final attempt.
 
