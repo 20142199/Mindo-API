@@ -28,6 +28,9 @@ type ProviderEditorialDraft = {
   title?: unknown;
   short_summary?: unknown;
   summary_lines?: unknown;
+  /** Thân bài, mỗi phần tử một đoạn — thứ schema yêu cầu */
+  content_paragraphs?: unknown;
+  /** Thân bài dạng chuỗi — DeepSeek không bị schema ràng buộc nên có thể vẫn trả kiểu này */
   content?: unknown;
   topic_slug?: unknown;
 };
@@ -82,7 +85,11 @@ export class NewsAiSummaryService {
     const title = this.cleanText(draft.title);
     const summary = this.cleanText(draft.short_summary);
     const aiSummary = normalizeNewsSummary(Array.isArray(draft.summary_lines) ? draft.summary_lines.filter((line): line is string => typeof line === 'string') : '');
-    const content = this.cleanContent(draft.content);
+    const content = this.cleanContent(
+      Array.isArray(draft.content_paragraphs)
+        ? draft.content_paragraphs.filter((paragraph): paragraph is string => typeof paragraph === 'string').join('\n')
+        : draft.content,
+    );
     /*
       Chỉ nhận slug nằm trong danh sách đã đưa. DeepSeek không có ràng buộc
       `enum` như Gemini, nên có thể bịa ra một slug trông rất hợp lý — gán nó
@@ -113,8 +120,8 @@ export class NewsAiSummaryService {
       'Hãy tạo một bản tin độc lập bằng tiếng Việt dựa duy nhất trên các sự kiện và số liệu có trong bài nguồn.',
       'Giữ nguyên ý nghĩa, tên riêng, số liệu, mốc thời gian và các phát biểu được dẫn nguồn; không suy đoán, không thêm dữ kiện và không đưa lời khuyên tài chính.',
       'Viết lại tự nhiên cho độc giả Việt Nam, không dịch từng câu và không sao chép cách diễn đạt của nguồn.',
-      'Nội dung phải đủ chi tiết để dùng làm bài hiển thị trên site, có các đoạn văn rõ ràng và không dùng Markdown.',
-      'Chỉ trả về JSON với title, short_summary, summary_lines (4 đến 5 câu) và content.',
+      'Nội dung phải đủ chi tiết để dùng làm bài hiển thị trên site, chia thành các đoạn văn rõ ràng và không dùng Markdown.',
+      'Chỉ trả về JSON với title, short_summary, summary_lines (4 đến 5 câu) và content_paragraphs (thân bài, mỗi phần tử là một đoạn văn, 3 đến 8 đoạn).',
       ...(topics.length ? [
         `Chọn topic_slug là lĩnh vực chính của bài, đúng một trong: ${topics.map((topic) => `${topic.slug} (${topic.name})`).join(', ')}.`,
         `Nếu bài không thuộc lĩnh vực nào trong danh sách thì trả topic_slug là ${NO_TOPIC}.`,
@@ -127,10 +134,17 @@ export class NewsAiSummaryService {
       properties: {
         title: { type: 'string' }, short_summary: { type: 'string' },
         summary_lines: { type: 'array', items: { type: 'string' }, minItems: 4, maxItems: 5 },
-        content: { type: 'string' },
+        /*
+          MẢNG đoạn văn, không phải một chuỗi `content`: với chuỗi, Gemini
+          trả cả bài liền một khối, không một dấu xuống dòng nào (đo trên 20
+          bài đầu tiên của server ngày 28/09/2026) — dù prompt có dặn "các
+          đoạn văn rõ ràng". App tách đoạn theo dòng trống, nên cả bài hiện
+          thành một khối chữ dài.
+        */
+        content_paragraphs: { type: 'array', items: { type: 'string' }, minItems: 3, maxItems: 8 },
         ...(topics.length ? { topic_slug: { type: 'string', enum: [...topics.map((topic) => topic.slug), NO_TOPIC] } } : {}),
       },
-      required: ['title', 'short_summary', 'summary_lines', 'content', ...(topics.length ? ['topic_slug'] : [])],
+      required: ['title', 'short_summary', 'summary_lines', 'content_paragraphs', ...(topics.length ? ['topic_slug'] : [])],
       /*
         KHÔNG có `additionalProperties`: `responseSchema` của Gemini là một
         tập con của OpenAPI và trả 400 "Unknown name additionalProperties"
@@ -195,8 +209,13 @@ export class NewsAiSummaryService {
     return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
   }
 
+  /**
+   * Mỗi DÒNG là một đoạn, rồi ghép lại bằng dòng trống — dạng app tách đoạn.
+   * Trước đây chỉ tách theo dòng trống, nên nhà cung cấp nào ngăn đoạn bằng
+   * một dấu xuống dòng thì mọi đoạn bị gộp thành một.
+   */
   private cleanContent(value: unknown) {
     if (typeof value !== 'string') return '';
-    return value.replace(/```(?:\w+)?/g, '').split(/\n{2,}/).map((paragraph) => paragraph.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n\n');
+    return value.replace(/```(?:\w+)?/g, '').split(/\n+/).map((paragraph) => paragraph.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n\n');
   }
 }
