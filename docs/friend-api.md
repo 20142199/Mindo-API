@@ -69,10 +69,27 @@ DELETE /api/v1/investor/friends/:friendUserId
 
 API xóa quan hệ ở cả hai chiều trong cùng transaction.
 
+## Ảnh riêng gán cho một liên hệ
+
+```http
+PATCH /api/v1/investor/friends/{userId}/avatar
+Content-Type: application/json
+
+{ "avatar_file_id": "cmu..." }
+```
+
+Gửi `{"avatar_file_id": null}` để xoá, trở về ảnh hồ sơ của người đó.
+
+Đây là ảnh **riêng của người gọi**, song song với `alias` (tên gợi nhớ) và cùng một lý do: `User.avatarFileId` là ảnh chủ tài khoản tự đặt, không ai đặt hộ được. Một chiều — A gán ảnh cho B thì B không biết, và hàng B→A vẫn trống.
+
+Tệp phải do **chính người gọi** tải lên (qua `POST /api/v1/investor/chat/attachments`) và phải là ảnh; gán tệp của người khác hoặc id không tồn tại đều trả `400`. Không kiểm điều này thì đoán trúng một id là xem được ảnh riêng tư của người lạ.
+
+`GET /friends` trả `alias_avatar_url` **riêng**, không đè lên `avatar_url`: màn sửa liên hệ cần biết cái nào là ảnh mình đặt mới mời "Xoá ảnh hiện tại" đúng lúc, và ảnh hồ sơ thật vẫn phải còn để rơi về. Cả hai đọc trong cùng một lượt truy vấn tệp.
+
 ## Cấu trúc dữ liệu
 
 - `FriendRequest`: khóa chính `requesterId + recipientId`.
-- `Friendship`: khóa chính `userId + friendUserId`.
+- `Friendship`: khóa chính `userId + friendUserId`; `alias` + `avatarFileId` là tên và ảnh riêng của chủ hàng, một chiều.
 - `User.phoneNormalized`: khóa duy nhất phục vụ tìm kiếm, không phải khóa của quan hệ bạn bè.
 
 Migration sẽ dừng nếu dữ liệu cũ có hai tài khoản trùng số điện thoại sau chuẩn hóa. Việc này tránh gửi lời mời nhầm tài khoản.

@@ -252,6 +252,20 @@ model FriendRequest {
 model Friendship {
   userId       String
   friendUserId String
+  /// Tên gợi nhớ do CHỦ hàng này đặt cho người kia. Một chiều: A đặt tên cho
+  /// B không đụng gì tới hàng B→A. null = chưa đặt, app rơi về nickname.
+  alias        String?
+  /// Bản bỏ dấu + chữ thường của `alias` — xem `User.fullNameNormalized`.
+  aliasNormalized String?
+  /// Ảnh RIÊNG chủ hàng này gán cho người kia, song song với `alias`. Một
+  /// chiều, và chỉ mình họ thấy. null = chưa gán, app rơi về ảnh hồ sơ của
+  /// người kia rồi mới tới chữ cái đầu.
+  avatarFileId String?
+  /// Số điện thoại và email RIÊNG chủ hàng này ghi cho người kia — ô ghi chú
+  /// cá nhân, không ràng buộc định dạng. null = chưa ghi, app rơi về thông
+  /// tin trong hồ sơ của người kia.
+  aliasPhone   String?
+  aliasEmail   String?
   createdAt    DateTime @default(now())
   user         User     @relation("FriendshipOwner", fields: [userId], references: [id], onDelete: Cascade)
   friend       User     @relation("FriendshipTarget", fields: [friendUserId], references: [id], onDelete: Cascade)
