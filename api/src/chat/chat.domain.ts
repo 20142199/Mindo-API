@@ -32,6 +32,14 @@ export function searchKey(value: string) {
     .trim();
 }
 
+/**
+ * Câu thay cho nội dung của một tin đã bị thu hồi.
+ *
+ * Một chỗ giữ, vì nó xuất hiện ở hai nơi khác nhau — dòng xem trước của hội
+ * thoại và ô trích dẫn trong tin trả lời — và hai nơi đó phải nói y hệt nhau.
+ */
+export const RECALLED_MESSAGE_PREVIEW = 'Tin nhắn đã được thu hồi';
+
 export function messagePreview(type: ChatMessageType, content?: string | null) {
   if (type === ChatMessageType.IMAGE) return content?.trim() || 'Đã gửi một hình ảnh';
   if (type === ChatMessageType.FILE) return content?.trim() || 'Đã gửi một tệp';
