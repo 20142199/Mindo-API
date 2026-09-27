@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { AiExpert, AiMessageKind } from '@prisma/client';
 import { AiAspectRatio, AiImageStyle, aspectRatioOf, imageDimensions, imageStyleOf, sanitizeTitle, styledPrompt } from './ai-image.options';
@@ -243,9 +244,11 @@ export class AiProviderService {
   private async generatePollinationsImage(input: string, ratio: AiAspectRatio, startedAt: number, signal?: AbortSignal): Promise<AiResult> {
     const vendor: AiVendor = 'pollinations';
     const { width, height } = imageDimensions(ratio);
+    /* Không có seed thì Pollinations trả đúng tấm cũ cho cùng mô tả — "Tạo lại" vô nghĩa */
+    const seed = randomInt(1, 2_147_483_647);
     const baseUrl = (process.env.POLLINATIONS_BASE_URL ?? 'https://image.pollinations.ai').replace(/\/+$/, '');
     const model = process.env.POLLINATIONS_MODEL ?? 'flux';
-    const url = `${baseUrl}/prompt/${encodeURIComponent(input)}?width=${width}&height=${height}&nologo=true&model=${encodeURIComponent(model)}`;
+    const url = `${baseUrl}/prompt/${encodeURIComponent(input)}?width=${width}&height=${height}&seed=${seed}&nologo=true&model=${encodeURIComponent(model)}`;
 
     let response: Response;
     try {
@@ -280,6 +283,7 @@ export class AiProviderService {
         credits: 1,
         width,
         height,
+        seed,
         latency_ms: Date.now() - startedAt,
       },
     };

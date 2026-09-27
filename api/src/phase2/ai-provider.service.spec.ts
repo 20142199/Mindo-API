@@ -297,6 +297,33 @@ describe('AiProviderService', () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(body.generationConfig.imageConfig).toEqual({ aspectRatio: '4:3' });
   });
+  it('Pollinations: mỗi lần gọi một seed ngẫu nhiên — "Tạo lại" phải ra ảnh KHÁC', async () => {
+    /*
+      Pollinations trả kết quả cố định theo (mô tả, tham số). Không có seed thì
+      bấm "Tạo lại" nhận về đúng tấm cũ từng byte — đo trên máy ngày 28/09/2026:
+      hai lần tạo cùng md5, cùng 25.930 byte.
+    */
+    process.env.AI_MOCK = 'false';
+    process.env.IMAGE_VENDOR = 'pollinations';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true, status: 200,
+      headers: { get: () => 'image/jpeg' },
+      arrayBuffer: async () => new TextEncoder().encode('x').buffer,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const service = new AiProviderService();
+
+    const first = await service.generate(expert, AiMessageKind.IMAGE, 'robot');
+    const second = await service.generate(expert, AiMessageKind.IMAGE, 'robot');
+
+    const seedOf = (call: number) => new URL(String(fetchMock.mock.calls[call][0])).searchParams.get('seed');
+    expect(seedOf(0)).toMatch(/^\d+$/);
+    expect(seedOf(0)).not.toBe(seedOf(1));
+    /* ghi lại để lần sau muốn tái hiện đúng tấm đó thì còn có số */
+    expect(first.metadata?.seed).toBe(Number(seedOf(0)));
+    expect(second.metadata?.seed).toBe(Number(seedOf(1)));
+  });
+
   describe('summarizeTitle', () => {
     it('lấy tiêu đề từ model chữ và dọn ngoặc, dấu chấm', async () => {
       process.env.AI_MOCK = 'false';
