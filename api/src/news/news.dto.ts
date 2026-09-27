@@ -1,8 +1,13 @@
 import { Type } from 'class-transformer';
 import { ArticleStatus, NewsContentType, NewsFeedbackType } from '@prisma/client';
-import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, IsUrl, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsOptional, IsString, IsUrl, Max, MaxLength, Min, MinLength } from 'class-validator';
+
+export const NEWS_FEEDS = ['all', 'for_you'] as const;
+export type NewsFeed = (typeof NEWS_FEEDS)[number];
 
 export class ListNewsDto {
+  /** `for_you`: chỉ bài thuộc các lĩnh vực người dùng quan tâm — cần đăng nhập. */
+  @IsOptional() @IsIn(NEWS_FEEDS) feed?: NewsFeed;
   @IsOptional() @IsString() q?: string;
   @IsOptional() @IsString() topic?: string;
   @IsOptional() @IsString() expert?: string;

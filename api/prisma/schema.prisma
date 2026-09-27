@@ -59,6 +59,7 @@ enum NewsFeedbackType {
   NOT_INTERESTED
   HIDE_TOPIC
   REPORT
+  HIDE_SOURCE
 }
 
 enum NewsCrawlStatus {
@@ -232,6 +233,7 @@ model User {
   newsInterests                NewsUserInterest[]
   likedNewsArticles            NewsArticleLike[]
   newsFeedback                 NewsArticleFeedback[]
+  newsAiSummaryUnlocks         NewsAiSummaryUnlock[]
   chatMemberships              ConversationMember[]
   createdConversations         Conversation[]         @relation("ConversationCreator")
   sentChatMessages             ChatMessage[]
@@ -850,6 +852,7 @@ model NewsArticle {
   source                  NewsSource?           @relation(fields: [sourceId], references: [id], onDelete: SetNull)
   likes                   NewsArticleLike[]
   feedback                NewsArticleFeedback[]
+  aiSummaryUnlocks        NewsAiSummaryUnlock[]
 
   @@unique([sourceId, externalKey])
   @@index([status, publishedAt])
@@ -878,6 +881,7 @@ model NewsSource {
   topic                NewsTopic?     @relation(fields: [topicId], references: [id], onDelete: SetNull)
   articles             NewsArticle[]
   crawlRuns            NewsCrawlRun[]
+  feedback             NewsArticleFeedback[]
 
   @@index([isActive, lastCrawledAt])
   @@index([topicId])
@@ -973,17 +977,38 @@ model NewsArticleFeedback {
   id        String           @id @default(cuid())
   userId    String
   articleId String
+  /// Chỉ có ở `HIDE_TOPIC`: lĩnh vực bị ẩn, chép từ bài lúc bấm.
   topicId   String?
+  /// Chỉ có ở `HIDE_SOURCE`: nguồn bị ẩn, chép từ bài lúc bấm — để bộ lọc
+  /// tin đọc thẳng từ đây trong một truy vấn, không phải join qua bài.
+  sourceId  String?
   type      NewsFeedbackType
   reason    String?
   createdAt DateTime         @default(now())
   user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   article   NewsArticle      @relation(fields: [articleId], references: [id], onDelete: Cascade)
   topic     NewsTopic?       @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  source    NewsSource?      @relation(fields: [sourceId], references: [id], onDelete: SetNull)
 
   @@unique([userId, articleId, type])
   @@index([articleId, type])
   @@index([userId, type, createdAt])
+  @@index([sourceId])
+}
+
+/// Một dòng = một người đã mở bản tóm tắt AI của một bài = một lượt đã dùng.
+/// Khoá chính (userId, articleId) bảo đảm mở lại bài cũ không bị trừ lượt
+/// lần hai; số lượt trong tháng là số dòng có `createdAt` trong tháng đó.
+model NewsAiSummaryUnlock {
+  userId    String
+  articleId String
+  createdAt DateTime    @default(now())
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  article   NewsArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, articleId])
+  @@index([userId, createdAt])
+  @@index([articleId])
 }
 
 model AuditLog {

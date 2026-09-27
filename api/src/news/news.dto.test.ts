@@ -25,6 +25,16 @@ describe('news DTOs', () => {
     }
   });
 
+  it('accepts hiding a source', async () => {
+    expect(await validate(plainToInstance(NewsFeedbackDto, { type: NewsFeedbackType.HIDE_SOURCE }))).toHaveLength(0);
+  });
+
+  it('accepts only the two known feeds', async () => {
+    expect(await validate(plainToInstance(ListNewsDto, { feed: 'for_you' }))).toHaveLength(0);
+    expect(await validate(plainToInstance(ListNewsDto, { feed: 'all' }))).toHaveLength(0);
+    expect((await validate(plainToInstance(ListNewsDto, { feed: 'trending' }))).some((error) => error.property === 'feed')).toBe(true);
+  });
+
   it('limits the number of selected interests', async () => {
     const dto = plainToInstance(SetNewsInterestsDto, { topic_ids: Array.from({ length: 21 }, (_, index) => `topic-${index}`) });
     expect((await validate(dto)).some((error) => error.property === 'topic_ids')).toBe(true);

@@ -155,15 +155,27 @@ export class NewsCrawlService {
   async editorializeArticleById(id: string) {
     const article = await this.prisma.newsArticle.findUnique({
       where: { id },
-      select: { id: true, sourceTitle: true, sourceContent: true, externalKey: true },
+      select: { id: true, sourceTitle: true, sourceContent: true, externalKey: true, topicId: true },
     });
     if (!article) throw new NotFoundException('Bài viết không tồn tại');
     if (!article.sourceContent?.trim()) throw new BadRequestException('Bài viết chưa có nội dung gốc để AI biên tập');
     try {
-      const draft = await this.aiSummary.createEditorialDraft(article.sourceTitle ?? 'Bài viết nguồn', article.sourceContent);
+      const topics = await this.prisma.newsTopic.findMany({ where: { isActive: true }, select: { id: true, slug: true, name: true }, orderBy: { sortOrder: 'asc' } });
+      const draft = await this.aiSummary.createEditorialDraft(
+        article.sourceTitle ?? 'Bài viết nguồn',
+        article.sourceContent,
+        topics.map(({ slug, name }) => ({ slug, name })),
+      );
       return await this.prisma.newsArticle.update({
         where: { id },
         data: {
+          /*
+            Lĩnh vực là thứ tab "Dành cho bạn" và hàng chip lọc theo, mà mọi
+            nguồn crawl đều chưa gán lĩnh vực — nên nhờ AI chọn luôn lúc biên
+            tập. Chỉ điền chỗ còn trống: lĩnh vực admin (hoặc nguồn) đã gán là
+            quyết định của người, biên tập lại không được đè lên.
+          */
+          ...(article.topicId ? {} : { topicId: topics.find((topic) => topic.slug === draft.topicSlug)?.id ?? null }),
           title: draft.title,
           slug: this.articleSlug(draft.title, article.externalKey ?? this.externalKey(article.id)),
           summary: draft.summary,
