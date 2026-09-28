@@ -138,11 +138,6 @@ export class Phase1Controller {
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Roles(UserRole.ADMIN, UserRole.FINANCE) @Get('admin/deposits')
   deposits(@Query('status') status?: DepositStatus) { return this.service.listDeposits(undefined, status).then((data) => ok(data)); }
 
-  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Roles(UserRole.ADMIN, UserRole.FINANCE) @Post('admin/deposits/:id/confirm')
-  confirmDeposit(@Req() req: AuthedRequest, @Param('id') id: string, @Body() dto: DepositReviewDto) {
-    return this.service.confirmDeposit(authUser(req).id, id, dto.review_note).then((data) => ok(data, 'Đã xác nhận tiền vào'));
-  }
-
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Roles(UserRole.ADMIN, UserRole.FINANCE) @Post('admin/deposits/:id/reject')
   rejectDeposit(@Req() req: AuthedRequest, @Param('id') id: string, @Body() dto: DepositReviewDto) {
     return this.service.rejectDeposit(authUser(req).id, id, dto.review_note).then((data) => ok(data, 'Đã từ chối lệnh nạp'));

@@ -670,6 +670,8 @@ dd { color: var(--navy); font-size: 13px; font-weight: 500; }
 .drawer-review-actions { display: grid; grid-template-columns: 1fr 1.3fr; gap: 9px; margin-top: 14px; }
 .drawer-result, .review-summary { display: grid; gap: 5px; margin-top: 16px; padding: 13px 14px; border: 1px solid #cbdba6; border-radius: 12px; color: #42540a; background: #f6faec; font-size: 12px; }
 .drawer-result span, .review-summary span { color: #657443; line-height: 18px; }
+.drawer-result.pending { border-color: #c9d8ef; color: #214d87; background: #f2f7fd; }
+.drawer-result.pending span { color: #60738e; }
 .pricing-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin-bottom: 20px; overflow: hidden; border: 1px solid var(--border-soft); border-radius: 16px; background: var(--border-soft); box-shadow: var(--shadow-sm); }
 .pricing-summary > div { min-height: 88px; display: grid; align-content: center; gap: 6px; padding: 15px 18px; background: #fff; }
 .pricing-summary small { color: var(--muted); font-size: 10px; }

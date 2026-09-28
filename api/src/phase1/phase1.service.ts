@@ -256,31 +256,6 @@ export class Phase1Service {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  confirmDeposit(actorId: string, id: string, note?: string) {
-    return this.prisma.$transaction(async (tx) => {
-      const deposit = await tx.deposit.findUniqueOrThrow({ where: { id } });
-      if (deposit.status === DepositStatus.CONFIRMED) return deposit;
-      if (deposit.status !== DepositStatus.PENDING) throw new BadRequestException('Lệnh nạp không còn chờ xử lý');
-      const user = await tx.user.findUniqueOrThrow({ where: { id: deposit.userId } });
-      const balanceAfter = user.balanceVnd.plus(deposit.amountVnd);
-      const updated = await tx.deposit.update({
-        where: { id },
-        data: {
-          status: DepositStatus.CONFIRMED,
-          reviewedAt: new Date(),
-          reviewedById: actorId,
-          reviewNote: note,
-          balanceBeforeVnd: user.balanceVnd,
-          balanceAfterVnd: balanceAfter,
-        },
-      });
-      await tx.user.update({ where: { id: deposit.userId }, data: { balanceVnd: balanceAfter } });
-      await tx.ledgerEntry.create({ data: { userId: deposit.userId, amountVnd: deposit.amountVnd, direction: 'CREDIT', description: `Nạp tiền ${deposit.transferCode}`, depositId: deposit.id } });
-      await tx.auditLog.create({ data: { actorId, action: 'DEPOSIT_CONFIRMED', entityType: 'Deposit', entityId: id, metadata: { amountVnd: deposit.amountVnd.toString() } } });
-      return updated;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-  }
-
   async rejectDeposit(actorId: string, id: string, note?: string) {
     const deposit = await this.prisma.deposit.findUniqueOrThrow({ where: { id } });
     if (deposit.status !== DepositStatus.PENDING) return deposit;

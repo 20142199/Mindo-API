@@ -24,7 +24,7 @@ const routeMeta: Record<RouteName, { title: string; description: string }> = {
   agencies: { title: 'Đại lý', description: 'Quản lý mạng lưới kinh doanh' },
   referrals: { title: 'Hệ thống giới thiệu', description: 'Cấu hình thưởng và theo dõi đầu nhánh' },
   'ai-experts': { title: 'AI chuyên gia', description: 'Cấu hình trợ lý Mindo' },
-  deposits: { title: 'Nạp tiền VietQR', description: 'Đối soát và xác nhận tiền vào' },
+  deposits: { title: 'Nạp tiền VietQR', description: 'Đối soát và ghi có tự động' },
   products: { title: 'Sản phẩm Peer', description: 'Nguồn cung và trạng thái mở bán' },
   transactions: { title: 'Giao dịch', description: 'Theo dõi đơn mua và Peer đã cấp' },
   news: { title: 'Trung tâm tin tức', description: 'Quản lý bài viết, Sóng và chuyên gia' },

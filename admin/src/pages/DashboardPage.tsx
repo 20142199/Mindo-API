@@ -37,7 +37,7 @@ export function DashboardPage({ onOpenKyc, onNavigate }: { onOpenKyc: (kyc: KycR
 
   const cards = [
     { label: 'KYC chờ duyệt', value: metrics?.kyc_pending ?? '—', icon: UserRoundCheck },
-    { label: 'Lệnh nạp chờ xử lý', value: metrics?.deposits_pending ?? '—', icon: WalletCards },
+    { label: 'Lệnh nạp chờ thanh toán', value: metrics?.deposits_pending ?? '—', icon: WalletCards },
     { label: 'Peer đã cấp', value: metrics?.nft_sold ?? '—', icon: Box },
     { label: 'Giao dịch cần kiểm tra', value: metrics?.transactions_need_review ?? '—', icon: Waypoints },
   ];
@@ -58,7 +58,7 @@ export function DashboardPage({ onOpenKyc, onNavigate }: { onOpenKyc: (kyc: KycR
         </div>
         <div className="table-heading"><h2>Công việc cần xử lý</h2></div>
         <div className="table-scroll"><table><thead><tr><th>Loại</th><th>Người dùng</th><th>Số tiền</th><th>Trạng thái</th><th>Thời gian</th><th>Thao tác</th></tr></thead><tbody>
-          {visibleItems.map((item) => <tr key={`${item.type}-${item.id}`}><td>{item.type}</td><td><strong>{item.name}</strong><small>{item.email}</small></td><td>{item.amount ? money.format(Number(item.amount)) : '—'}</td><td><Status value={item.status} /></td><td>{dateTime.format(new Date(item.createdAt))}</td><td><button className="text-button" onClick={() => item.kyc ? onOpenKyc(item.kyc) : item.route && onNavigate(item.route)}>Xem chi tiết</button></td></tr>)}
+          {visibleItems.map((item) => <tr key={`${item.type}-${item.id}`}><td>{item.type}</td><td><strong>{item.name}</strong><small>{item.email}</small></td><td>{item.amount ? money.format(Number(item.amount)) : '—'}</td><td><Status value={item.status} type={item.type} /></td><td>{dateTime.format(new Date(item.createdAt))}</td><td><button className="text-button" onClick={() => item.kyc ? onOpenKyc(item.kyc) : item.route && onNavigate(item.route)}>Xem chi tiết</button></td></tr>)}
           {visibleItems.length === 0 ? <tr><td colSpan={6} className="empty">Không có công việc phù hợp.</td></tr> : null}
         </tbody></table></div>
         <footer className="table-footer"><span>Hiển thị <strong>{visibleItems.length}</strong> công việc</span><span className="pagination"><button disabled aria-label="Trang trước">‹</button><button className="current" aria-label="Trang 1">1</button><button disabled aria-label="Trang sau">›</button></span></footer>
@@ -67,7 +67,9 @@ export function DashboardPage({ onOpenKyc, onNavigate }: { onOpenKyc: (kyc: KycR
   );
 }
 
-function Status({ value }: { value: string }) {
+function Status({ value, type }: { value: string; type: string }) {
+  if (type === 'Nạp tiền' && value === 'PENDING') return <span className="status warning">Chờ thanh toán</span>;
+  if (type === 'Nạp tiền' && value === 'CONFIRMED') return <span className="status success">Đã ghi có</span>;
   const status = statusDisplay(value);
   return <span className={`status ${status.tone}`}>{status.label}</span>;
 }
