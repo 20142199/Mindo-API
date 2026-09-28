@@ -9,6 +9,12 @@ import { UpdateNewsSourceDto } from './news.dto';
 
 const USER_AGENT = 'MindoNewsBot/1.0 (+https://mindo.vn/news-source)';
 const MAX_HTML_BYTES = 3 * 1024 * 1024;
+/*
+  Kiểm ảnh bằng UA của trình duyệt điện thoại chứ không bằng UA của bot: câu
+  hỏi cần trả lời là "app có tải được ảnh này không", và app tải ảnh như một
+  trình duyệt. Có CDN chặn bot nhưng cho trình duyệt qua.
+*/
+const IMAGE_CHECK_USER_AGENT = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148';
 
 @Injectable()
 export class NewsCrawlService {
@@ -85,7 +91,7 @@ export class NewsCrawlService {
               slug: this.articleSlug(article.title, candidate.externalKey),
               summary: article.summary,
               content: '',
-              imageUrl: article.imageUrl,
+              imageUrl: await this.usableImageUrl(article.imageUrl),
               sourceUrl: article.url,
               sourceId: source.id,
               externalKey: candidate.externalKey,
@@ -196,6 +202,40 @@ export class NewsCrawlService {
         data: { aiEditorialStatus: NewsEditorialStatus.FAILED, aiEditorialError: this.errorMessage(error) },
       });
       throw error;
+    }
+  }
+
+  /**
+   * Trả lại `url` nếu nó thật sự là một ảnh app tải được, ngược lại `undefined`.
+   *
+   * Lý do có hàm này: `og:image` của Forex Factory luôn là `…/image` và luôn
+   * trả 403 kèm trang HTML của Cloudflare — kể cả khi gọi từ server. Lưu
+   * nguyên link đó thì cả 162 bài của nguồn này hiện một ô xám to trên app.
+   * Không có ảnh thì app vẽ thẻ không ảnh, gọn hơn một ô xám.
+   *
+   * Chỉ đọc phần đầu phản hồi rồi huỷ thân, không tải cả ảnh. SVG bị loại vì
+   * `<Image>` của React Native không vẽ được. Chỉ nhận https: link http thì
+   * iOS chặn theo ATS, lưu vào cũng như không.
+   */
+  async usableImageUrl(url: string | undefined) {
+    if (!url) return undefined;
+    try {
+      if (new URL(url).protocol !== 'https:') return undefined;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8_000);
+      try {
+        const response = await fetch(url, {
+          redirect: 'follow', signal: controller.signal,
+          headers: { 'user-agent': IMAGE_CHECK_USER_AGENT, accept: 'image/*' },
+        });
+        await response.body?.cancel().catch(() => undefined);
+        const type = response.headers.get('content-type')?.toLowerCase() ?? '';
+        return response.ok && type.startsWith('image/') && !type.startsWith('image/svg') ? url : undefined;
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch {
+      return undefined;
     }
   }
 
