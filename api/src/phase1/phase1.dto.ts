@@ -1,6 +1,6 @@
 import { ArticleStatus, ReviewStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsEmail, IsEnum, IsIn, IsInt, IsNumber, IsNumberString, IsOptional, IsString, IsUrl, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsEnum, IsIn, IsInt, IsNumber, IsNumberString, IsOptional, IsString, IsUrl, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class CreateKycDto {
   @IsString() @MinLength(2) full_name!: string;
@@ -59,6 +59,17 @@ export class CreateNftProductDto {
   @IsUrl({ require_tld: false }) metadata_base_url!: string;
   @IsNumberString() unit_price_vnd!: string;
   @IsInt() @Min(1) total_supply!: number;
+}
+
+export class UpdateNftProductDto {
+  @IsOptional() @IsString() @MinLength(2) name?: string;
+  @IsOptional() @IsString() @MinLength(2) symbol?: string;
+  @IsOptional() @IsString() description?: string;
+  @IsOptional() @IsUrl({ require_tld: false }) image_url?: string;
+  @IsOptional() @IsUrl({ require_tld: false }) metadata_base_url?: string;
+  @IsOptional() @IsNumberString() unit_price_vnd?: string;
+  @IsOptional() @IsInt() @Min(1) total_supply?: number;
+  @IsOptional() @IsBoolean() is_active?: boolean;
 }
 
 export class CalculatePriceDto {

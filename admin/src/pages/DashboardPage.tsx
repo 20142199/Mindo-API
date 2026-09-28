@@ -1,14 +1,15 @@
 import { Box, CalendarDays, RefreshCw, Search, UserRoundCheck, WalletCards, Waypoints } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { api, type DashboardMetrics, type DepositRow, type KycRow, type TransactionRow } from '../api';
+import type { RouteName } from '../components/AppShell';
 import { statusDisplay } from '../status';
 
-type WorkItem = { id: string; type: string; name: string; email: string; amount?: string; status: string; createdAt: string; kyc?: KycRow };
+type WorkItem = { id: string; type: string; name: string; email: string; amount?: string; status: string; createdAt: string; kyc?: KycRow; route?: RouteName };
 
 const money = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 });
 const dateTime = new Intl.DateTimeFormat('vi-VN', { dateStyle: 'short', timeStyle: 'short' });
 
-export function DashboardPage({ onOpenKyc }: { onOpenKyc: (kyc: KycRow) => void }) {
+export function DashboardPage({ onOpenKyc, onNavigate }: { onOpenKyc: (kyc: KycRow) => void; onNavigate: (route: RouteName) => void }) {
   const [metrics, setMetrics] = useState<DashboardMetrics>();
   const [items, setItems] = useState<WorkItem[]>([]);
   const [query, setQuery] = useState('');
@@ -22,8 +23,8 @@ export function DashboardPage({ onOpenKyc }: { onOpenKyc: (kyc: KycRow) => void 
       setMetrics(nextMetrics);
       setItems([
         ...kyc.map((row: KycRow): WorkItem => ({ id: row.id, type: 'KYC', name: row.fullName, email: row.user.email, status: row.status, createdAt: row.createdAt, kyc: row })),
-        ...deposits.map((row: DepositRow): WorkItem => ({ id: row.id, type: 'Nạp tiền', name: row.user.fullName, email: row.user.email, amount: row.amountVnd, status: row.status, createdAt: row.createdAt })),
-        ...transactions.map((row: TransactionRow): WorkItem => ({ id: row.id, type: 'Giao dịch', name: row.user.fullName, email: row.user.email, amount: row.totalVnd, status: row.status, createdAt: row.createdAt })),
+        ...deposits.map((row: DepositRow): WorkItem => ({ id: row.id, type: 'Nạp tiền', name: row.user.fullName, email: row.user.email, amount: row.amountVnd, status: row.status, createdAt: row.createdAt, route: 'deposits' })),
+        ...transactions.map((row: TransactionRow): WorkItem => ({ id: row.id, type: 'Mua Peer', name: row.user.fullName, email: row.user.email, amount: row.totalVnd, status: row.status, createdAt: row.createdAt, route: 'transactions' })),
       ].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Không thể tải dữ liệu'); }
   }
@@ -37,7 +38,7 @@ export function DashboardPage({ onOpenKyc }: { onOpenKyc: (kyc: KycRow) => void 
   const cards = [
     { label: 'KYC chờ duyệt', value: metrics?.kyc_pending ?? '—', icon: UserRoundCheck },
     { label: 'Lệnh nạp chờ xử lý', value: metrics?.deposits_pending ?? '—', icon: WalletCards },
-    { label: 'NFT đã bán', value: metrics?.nft_sold ?? '—', icon: Box },
+    { label: 'Peer đã cấp', value: metrics?.nft_sold ?? '—', icon: Box },
     { label: 'Giao dịch cần kiểm tra', value: metrics?.transactions_need_review ?? '—', icon: Waypoints },
   ];
 
@@ -52,12 +53,12 @@ export function DashboardPage({ onOpenKyc }: { onOpenKyc: (kyc: KycRow) => void 
         <div className="filters">
           <label className="search"><Search size={18} /><input aria-label="Tìm kiếm" placeholder="Tìm kiếm người dùng, mã giao dịch..." value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           <label className="select-label"><span>Trạng thái</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="ALL">Tất cả</option><option value="PENDING">Chờ duyệt</option><option value="CONFIRMED">Đã xác nhận</option><option value="COMPLETED">Hoàn tất</option><option value="FAILED">Cần kiểm tra</option></select></label>
-          <label className="date-filter"><CalendarDays size={17} /> 01/09/2026 - 07/09/2026</label>
+          <label className="date-filter"><CalendarDays size={17} /> Toàn bộ thời gian</label>
           <button className="outline-button" onClick={() => void load()}><RefreshCw size={17} /> Làm mới</button>
         </div>
         <div className="table-heading"><h2>Công việc cần xử lý</h2></div>
         <div className="table-scroll"><table><thead><tr><th>Loại</th><th>Người dùng</th><th>Số tiền</th><th>Trạng thái</th><th>Thời gian</th><th>Thao tác</th></tr></thead><tbody>
-          {visibleItems.map((item) => <tr key={`${item.type}-${item.id}`}><td>{item.type}</td><td><strong>{item.name}</strong><small>{item.email}</small></td><td>{item.amount ? money.format(Number(item.amount)) : '—'}</td><td><Status value={item.status} /></td><td>{dateTime.format(new Date(item.createdAt))}</td><td><button className="text-button" onClick={() => item.kyc && onOpenKyc(item.kyc)} disabled={!item.kyc}>Xem chi tiết</button></td></tr>)}
+          {visibleItems.map((item) => <tr key={`${item.type}-${item.id}`}><td>{item.type}</td><td><strong>{item.name}</strong><small>{item.email}</small></td><td>{item.amount ? money.format(Number(item.amount)) : '—'}</td><td><Status value={item.status} /></td><td>{dateTime.format(new Date(item.createdAt))}</td><td><button className="text-button" onClick={() => item.kyc ? onOpenKyc(item.kyc) : item.route && onNavigate(item.route)}>Xem chi tiết</button></td></tr>)}
           {visibleItems.length === 0 ? <tr><td colSpan={6} className="empty">Không có công việc phù hợp.</td></tr> : null}
         </tbody></table></div>
         <footer className="table-footer"><span>Hiển thị <strong>{visibleItems.length}</strong> công việc</span><span className="pagination"><button disabled aria-label="Trang trước">‹</button><button className="current" aria-label="Trang 1">1</button><button disabled aria-label="Trang sau">›</button></span></footer>

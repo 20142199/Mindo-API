@@ -10,6 +10,10 @@ import { AdminAccountsPage } from './pages/AdminAccountsPage';
 import { AiExpertsPage } from './pages/AiExpertsPage';
 import { ReferralsPage } from './pages/ReferralsPage';
 import { NewsPage } from './pages/NewsPage';
+import { KycListPage } from './pages/KycListPage';
+import { DepositsPage } from './pages/DepositsPage';
+import { ProductsPage } from './pages/ProductsPage';
+import { TransactionsPage } from './pages/TransactionsPage';
 
 export default function App() {
   const [route, setRoute] = useState<RouteName>('dashboard');
@@ -17,14 +21,19 @@ export default function App() {
   const demo = import.meta.env.VITE_DEMO_MODE === 'true';
   if (!demo && !getToken()) return <Login />;
   let content: React.ReactNode;
-  if (route === 'dashboard') content = <DashboardPage onOpenKyc={(kyc) => { setSelectedKyc(kyc); setRoute('kyc'); }} />;
-  else if (route === 'kyc') content = <KycDetailPage row={selectedKyc} onBack={() => setRoute('dashboard')} />;
+  if (route === 'dashboard') content = <DashboardPage onOpenKyc={(kyc) => { setSelectedKyc(kyc); setRoute('kyc'); }} onNavigate={setRoute} />;
+  else if (route === 'kyc') content = selectedKyc
+    ? <KycDetailPage row={selectedKyc} onBack={() => setSelectedKyc(undefined)} />
+    : <KycListPage onOpen={setSelectedKyc} />;
   else if (route === 'agencies') content = <AgenciesPage />;
   else if (route === 'referrals') content = <ReferralsPage />;
   else if (route === 'ai-experts') content = <AiExpertsPage />;
   else if (route === 'news') content = <NewsPage />;
+  else if (route === 'deposits') content = <DepositsPage />;
+  else if (route === 'products') content = <ProductsPage />;
+  else if (route === 'transactions') content = <TransactionsPage />;
   else content = <AdminAccountsPage />;
-  return <AppShell route={route} onNavigate={setRoute}>{content}</AppShell>;
+  return <AppShell route={route} onNavigate={(nextRoute) => { if (nextRoute === 'kyc') setSelectedKyc(undefined); setRoute(nextRoute); }}>{content}</AppShell>;
 }
 
 function Login() {

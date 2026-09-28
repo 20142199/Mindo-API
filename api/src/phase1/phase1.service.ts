@@ -5,7 +5,7 @@ import { PrismaService } from '../common/prisma.module';
 import { normalizePhone } from '../common/identity.util';
 import { userView } from '../auth/auth.service';
 import { FileStorageService } from './file-storage.service';
-import { CreateArticleDto, CreateDepositDto, CreateKycDto, CreateNftProductDto, ReviewDto, VietQrCallbackDto } from './phase1.dto';
+import { CreateArticleDto, CreateDepositDto, CreateKycDto, CreateNftProductDto, ReviewDto, UpdateNftProductDto, VietQrCallbackDto } from './phase1.dto';
 import { requireAvailableSupply } from './domain';
 import { generateNumericOrderId, VietQrService } from './vietqr.service';
 import { ReferralService } from '../referral/referral.service';
@@ -115,7 +115,11 @@ export class Phase1Service {
   }
 
   async listKyc(status?: ReviewStatus) {
-    const rows = await this.prisma.kycSubmission.findMany({ where: status ? { status } : {}, include: { user: true }, orderBy: { createdAt: 'desc' } });
+    const rows = await this.prisma.kycSubmission.findMany({
+      where: status ? { status } : {},
+      include: { user: { select: { id: true, email: true, fullName: true, phone: true, referralCode: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
     return Promise.all(rows.map((row) => this.withKycFiles(row)));
   }
 
@@ -185,7 +189,11 @@ export class Phase1Service {
   }
 
   async listDeposits(userId?: string, status?: DepositStatus) {
-    const rows = await this.prisma.deposit.findMany({ where: { ...(userId ? { userId } : {}), ...(status ? { status } : {}) }, include: { user: true }, orderBy: { createdAt: 'desc' } });
+    const rows = await this.prisma.deposit.findMany({
+      where: { ...(userId ? { userId } : {}), ...(status ? { status } : {}) },
+      include: { user: { select: { id: true, email: true, fullName: true, phone: true, balanceVnd: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
     return rows.map((row) => this.depositView(row));
   }
 
@@ -300,6 +308,27 @@ export class Phase1Service {
   createProduct(dto: CreateNftProductDto) {
     return this.prisma.nftProduct.create({
       data: { name: dto.name, symbol: dto.symbol, description: dto.description, imageUrl: dto.image_url, metadataBaseUrl: dto.metadata_base_url, unitPriceVnd: new Prisma.Decimal(dto.unit_price_vnd), totalSupply: dto.total_supply },
+    });
+  }
+
+  async updateProduct(id: string, dto: UpdateNftProductDto) {
+    const current = await this.prisma.nftProduct.findUnique({ where: { id } });
+    if (!current) throw new NotFoundException('Peer không tồn tại');
+    if (dto.total_supply !== undefined && dto.total_supply < current.soldCount) {
+      throw new BadRequestException(`Nguồn cung không thể thấp hơn ${current.soldCount} Peer đã bán`);
+    }
+    return this.prisma.nftProduct.update({
+      where: { id },
+      data: {
+        name: dto.name?.trim(),
+        symbol: dto.symbol?.trim().toUpperCase(),
+        description: dto.description?.trim(),
+        imageUrl: dto.image_url,
+        metadataBaseUrl: dto.metadata_base_url,
+        unitPriceVnd: dto.unit_price_vnd === undefined ? undefined : new Prisma.Decimal(dto.unit_price_vnd),
+        totalSupply: dto.total_supply,
+        isActive: dto.is_active,
+      },
     });
   }
 
@@ -512,7 +541,15 @@ export class Phase1Service {
   }
 
   transactions(userId?: string) {
-    return this.prisma.purchaseOrder.findMany({ where: userId ? { userId } : {}, include: { user: true, product: true, nftAssets: true }, orderBy: { createdAt: 'desc' } });
+    return this.prisma.purchaseOrder.findMany({
+      where: userId ? { userId } : {},
+      include: {
+        user: { select: { id: true, email: true, fullName: true, phone: true, referralCode: true, agencyTitle: true } },
+        product: true,
+        nftAssets: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   private async buildPurchaseQuote(userId: string, productId: string, quantity: number, referralCode?: string) {

@@ -4,7 +4,7 @@ import { api, type AgencyPackageConfig, type AgencyRow, type AgencyStats, type A
 import { statusDisplay } from '../status';
 
 const money = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 });
-const tierLabels: Record<string, string> = { TIER_1: 'Đại lý 1', TIER_2: 'Đại lý 2', TIER_3: 'Đại lý 3' };
+const tierLabels: Record<string, string> = { TIER_1: 'Đại lý Hoàng Kim', TIER_2: 'Đại lý Bạch Kim', TIER_3: 'Đại lý Kim Cương' };
 
 export function AgenciesPage() {
   const [stats, setStats] = useState<AgencyStats>();
@@ -106,7 +106,7 @@ export function AgenciesPage() {
         <div className="filters agency-filters">
           <label className="search"><Search size={18} /><input aria-label="Tìm đại lý" placeholder="Tìm tên, email hoặc mã đại lý" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
           <label className="select-label"><span>Trạng thái</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="">Tất cả</option><option value="PENDING">Chờ duyệt</option><option value="APPROVED">Hoạt động</option><option value="LOCKED">Đã khóa</option><option value="REJECTED">Đã từ chối</option></select></label>
-          <label className="select-label"><span>Danh hiệu</span><select value={tier} onChange={(event) => setTier(event.target.value)}><option value="">Tất cả</option><option value="TIER_1">Đại lý 1</option><option value="TIER_2">Đại lý 2</option><option value="TIER_3">Đại lý 3</option></select></label>
+          <label className="select-label"><span>Danh hiệu</span><select value={tier} onChange={(event) => setTier(event.target.value)}><option value="">Tất cả</option><option value="TIER_1">Đại lý Hoàng Kim</option><option value="TIER_2">Đại lý Bạch Kim</option><option value="TIER_3">Đại lý Kim Cương</option></select></label>
           <button className="outline-button" onClick={() => void load()}><RefreshCw size={17} /> Làm mới</button>
         </div>
         <div className="table-heading"><h2>Danh sách đại lý</h2></div>

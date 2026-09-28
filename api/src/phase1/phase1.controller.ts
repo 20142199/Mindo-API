@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, Param, Post, Query, Req, Res, StreamableFile, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req, Res, StreamableFile, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { DepositStatus, ReviewStatus, UserRole } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
@@ -7,7 +7,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthenticatedRequest, JwtAuthGuard, Roles, authUser } from '../auth/auth.guard';
 import { ok } from '../common/api-response';
 import { FileStorageService } from './file-storage.service';
-import { CalculatePriceDto, CreateArticleDto, CreateDepositDto, CreateKycDto, CreateNftProductDto, DepositReviewDto, InvestDto, MyNftQueryDto, ReviewDto, SnapshotPriceDto, VietQrCallbackDto } from './phase1.dto';
+import { CalculatePriceDto, CreateArticleDto, CreateDepositDto, CreateKycDto, CreateNftProductDto, DepositReviewDto, InvestDto, MyNftQueryDto, ReviewDto, SnapshotPriceDto, UpdateNftProductDto, VietQrCallbackDto } from './phase1.dto';
 import { Phase1Service } from './phase1.service';
 import { VietQrService } from './vietqr.service';
 
@@ -153,6 +153,11 @@ export class Phase1Controller {
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Roles(UserRole.ADMIN) @Post('admin/nfts')
   createNft(@Body() dto: CreateNftProductDto) { return this.service.createProduct(dto).then((data) => ok(data, 'Đã tạo NFT')); }
+
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Roles(UserRole.ADMIN) @Patch('admin/nfts/:id')
+  updateNft(@Param('id') id: string, @Body() dto: UpdateNftProductDto) {
+    return this.service.updateProduct(id, dto).then((data) => ok(data, 'Đã cập nhật Peer'));
+  }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Roles(...adminRoles) @Get('admin/transactions')
   transactions() { return this.service.transactions().then((data) => ok(data)); }

@@ -12,27 +12,104 @@ export type KycRow = {
   idCardNumber: string;
   phoneNumber: string;
   address: string;
+  bankAccountName?: string;
+  bankAccountNumber?: string;
+  bankName?: string;
   idFrontFileUrl: string;
   idBackFileUrl: string;
+  selfieFileUrl?: string;
+  reviewedAt?: string;
+  reviewNote?: string;
+  rejectionReason?: string;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   createdAt: string;
   user: { email: string; fullName: string };
 };
 
+export type InvestorRow = {
+  id: string;
+  email: string;
+  full_name: string;
+  nickname: string;
+  referral_code: string;
+  referred_by_id: string;
+  phone: string;
+  role: string;
+  status: string;
+  kyc_status: string;
+  balance_vnd: string;
+  agency_title?: string;
+  total_packages_purchased: number;
+  created_at: number;
+};
+
 export type DepositRow = {
   id: string;
   amountVnd: string;
+  transferCode: string;
+  proofFileUrl?: string;
+  vietQrOrderId?: string;
+  qrCodeUrl?: string;
+  vietqr?: { qr_code?: string; bank_code?: string; bank_account?: string; account_name?: string; transfer_content?: string; amount?: number };
+  bankTransactionId?: string;
+  bankReferenceNumber?: string;
+  paidAmountVnd?: string;
+  paidAt?: string;
+  reviewedAt?: string;
+  reviewNote?: string;
+  expires_at?: string;
+  qr_expired?: boolean;
+  display_status?: string;
   status: 'PENDING' | 'CONFIRMED' | 'REJECTED';
   createdAt: string;
-  user: { email: string; fullName: string };
+  user: { id?: string; email: string; fullName: string; phone?: string; balanceVnd?: string };
 };
 
 export type TransactionRow = {
   id: string;
+  productId: string;
+  quantity: number;
+  unitPriceVnd: string;
   totalVnd: string;
+  grossTotalVnd?: string;
+  discountVnd?: string;
+  effectiveDiscountRate?: string;
+  agencyTitle?: string;
+  unitPriceUsd?: string;
+  usdVndRate?: string;
+  referralCode?: string;
   status: 'PENDING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
   createdAt: string;
-  user: { email: string; fullName: string };
+  updatedAt?: string;
+  user: { id?: string; email: string; fullName: string; phone?: string; referralCode?: string; agencyTitle?: string };
+  product: { id: string; name: string; symbol: string; imageUrl: string };
+  nftAssets: Array<{ id: string; assetCode: string; metadataUrl: string; issuedAt: string }>;
+};
+
+export type NftProduct = {
+  id: string;
+  name: string;
+  symbol: string;
+  description: string;
+  imageUrl: string;
+  metadataBaseUrl: string;
+  unitPriceVnd: string;
+  totalSupply: number;
+  soldCount: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SaveNftProduct = {
+  name: string;
+  symbol: string;
+  description: string;
+  image_url: string;
+  metadata_base_url: string;
+  unit_price_vnd: string;
+  total_supply: number;
+  is_active?: boolean;
 };
 
 export type AgencyStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'LOCKED';
@@ -238,9 +315,9 @@ const demoAgencies: AgencyRow[] = [
 const demoAgencyPackageConfig: AgencyPackageConfig = {
   base_price_usd: '25', usd_vnd_rate: '25000', unit_price_vnd: '625000', updated_at: new Date().toISOString(),
   tiers: [
-    { code: 'TIER_1', title: 'Đại lý 1', from_package: 1, to_package: 49, discount_percent: 20 },
-    { code: 'TIER_2', title: 'Đại lý 2', from_package: 50, to_package: 199, discount_percent: 30 },
-    { code: 'TIER_3', title: 'Đại lý 3', from_package: 200, to_package: null, discount_percent: 40 },
+    { code: 'TIER_1', title: 'Đại lý Hoàng Kim', from_package: 1, to_package: 49, discount_percent: 20 },
+    { code: 'TIER_2', title: 'Đại lý Bạch Kim', from_package: 50, to_package: 199, discount_percent: 30 },
+    { code: 'TIER_3', title: 'Đại lý Kim Cương', from_package: 200, to_package: null, discount_percent: 40 },
   ],
 };
 
@@ -275,19 +352,27 @@ export const demoData = {
   metrics: { kyc_pending: 28, deposits_pending: 41, nft_sold: 1256, transactions_need_review: 17 },
   kyc: [demoKyc],
   deposits: [
-    { id: 'd1', amountVnd: '25000000', status: 'PENDING', createdAt: '2026-09-07T03:15:00.000Z', user: { fullName: 'Trần Quang Huy', email: 'huytq@gmail.com' } },
-    { id: 'd2', amountVnd: '10000000', status: 'CONFIRMED', createdAt: '2026-09-07T02:58:00.000Z', user: { fullName: 'Lê Thị Bích Ngọc', email: 'ngocltb@gmail.com' } },
-    { id: 'd3', amountVnd: '50000000', status: 'PENDING', createdAt: '2026-09-07T01:47:00.000Z', user: { fullName: 'Đặng Quốc Bảo', email: 'baodq@gmail.com' } },
+    { id: 'd1', amountVnd: '25000000', transferCode: 'MINDO-D1', status: 'PENDING', createdAt: '2026-09-07T03:15:00.000Z', expires_at: '2026-09-07T03:30:00.000Z', qr_expired: true, display_status: 'expired', vietqr: { bank_code: 'ACB', bank_account: '13989647', account_name: 'TRAN DUY HUNG', transfer_content: 'MINDO-D1', amount: 25000000 }, user: { fullName: 'Trần Quang Huy', email: 'huytq@gmail.com' } },
+    { id: 'd2', amountVnd: '10000000', transferCode: 'MINDO-D2', status: 'CONFIRMED', createdAt: '2026-09-07T02:58:00.000Z', paidAt: '2026-09-07T03:01:00.000Z', bankTransactionId: 'ACB-DEMO-001', paidAmountVnd: '10000000', display_status: 'confirmed', user: { fullName: 'Lê Thị Bích Ngọc', email: 'ngocltb@gmail.com' } },
+    { id: 'd3', amountVnd: '50000000', transferCode: 'MINDO-D3', status: 'PENDING', createdAt: '2026-09-07T01:47:00.000Z', expires_at: '2026-09-07T02:02:00.000Z', qr_expired: true, display_status: 'expired', user: { fullName: 'Đặng Quốc Bảo', email: 'baodq@gmail.com' } },
   ] satisfies DepositRow[],
   transactions: [
-    { id: 't1', totalVnd: '12500000', status: 'FAILED', createdAt: '2026-09-07T02:33:00.000Z', user: { fullName: 'Hoàng Văn Nam', email: 'namhv@gmail.com' } },
-    { id: 't2', totalVnd: '3200000', status: 'COMPLETED', createdAt: '2026-09-07T02:45:00.000Z', user: { fullName: 'Phạm Duy Khang', email: 'khangpd@gmail.com' } },
-    { id: 't3', totalVnd: '8750000', status: 'FAILED', createdAt: '2026-09-07T02:12:00.000Z', user: { fullName: 'Đỗ Hồng Phúc', email: 'phucdh@gmail.com' } },
-    { id: 't4', totalVnd: '6400000', status: 'PENDING', createdAt: '2026-09-07T01:55:00.000Z', user: { fullName: 'Vũ Thu Hà', email: 'vuthuha@gmail.com' } },
+    { id: 't1', productId: 'peer-1', quantity: 25, unitPriceVnd: '625000', totalVnd: '12500000', grossTotalVnd: '15625000', discountVnd: '3125000', effectiveDiscountRate: '0.2', agencyTitle: 'TIER_1', status: 'FAILED', createdAt: '2026-09-07T02:33:00.000Z', user: { fullName: 'Hoàng Văn Nam', email: 'namhv@gmail.com' }, product: { id: 'peer-1', name: 'Mindo Genesis', symbol: 'PEER', imageUrl: '' }, nftAssets: [] },
+    { id: 't2', productId: 'peer-1', quantity: 5, unitPriceVnd: '625000', totalVnd: '2500000', grossTotalVnd: '3125000', discountVnd: '625000', effectiveDiscountRate: '0.2', agencyTitle: 'TIER_1', status: 'COMPLETED', createdAt: '2026-09-07T02:45:00.000Z', referralCode: 'MDABC123', user: { fullName: 'Phạm Duy Khang', email: 'khangpd@gmail.com' }, product: { id: 'peer-1', name: 'Mindo Genesis', symbol: 'PEER', imageUrl: '' }, nftAssets: Array.from({ length: 5 }, (_, index) => ({ id: `asset-${index}`, assetCode: `MINDO-T2-${index + 1}`, metadataUrl: '', issuedAt: '2026-09-07T02:45:00.000Z' })) },
+    { id: 't3', productId: 'peer-1', quantity: 18, unitPriceVnd: '625000', totalVnd: '9000000', grossTotalVnd: '11250000', discountVnd: '2250000', effectiveDiscountRate: '0.2', agencyTitle: 'TIER_1', status: 'FAILED', createdAt: '2026-09-07T02:12:00.000Z', user: { fullName: 'Đỗ Hồng Phúc', email: 'phucdh@gmail.com' }, product: { id: 'peer-1', name: 'Mindo Genesis', symbol: 'PEER', imageUrl: '' }, nftAssets: [] },
+    { id: 't4', productId: 'peer-1', quantity: 12, unitPriceVnd: '625000', totalVnd: '6000000', grossTotalVnd: '7500000', discountVnd: '1500000', effectiveDiscountRate: '0.2', agencyTitle: 'TIER_1', status: 'PENDING', createdAt: '2026-09-07T01:55:00.000Z', user: { fullName: 'Vũ Thu Hà', email: 'vuthuha@gmail.com' }, product: { id: 'peer-1', name: 'Mindo Genesis', symbol: 'PEER', imageUrl: '' }, nftAssets: [] },
   ] satisfies TransactionRow[],
 };
 
+const demoProducts: NftProduct[] = [{
+  id: 'peer-1', name: 'Mindo Genesis', symbol: 'PEER', description: 'Gói quyền sở hữu nội bộ Mindo.',
+  imageUrl: 'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?auto=format&fit=crop&w=500&q=80',
+  metadataBaseUrl: 'https://api-mindo.stg-studio.com/metadata', unitPriceVnd: '625000', totalSupply: 10000,
+  soldCount: 1256, isActive: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+}];
+
 export function getToken() { return sessionStorage.getItem('mindo_admin_token'); }
+export function clearToken() { sessionStorage.removeItem('mindo_admin_token'); }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
@@ -305,9 +390,15 @@ export const api = {
     sessionStorage.setItem('mindo_admin_token', data.access_token);
   },
   dashboard: () => demoMode ? Promise.resolve(demoData.metrics) : request<DashboardMetrics>('/api/v1/admin/dashboard'),
+  users: () => demoMode ? Promise.resolve([{ id: 'u-demo', email: 'minhanh.nguyen95@gmail.com', full_name: 'Nguyễn Minh Anh', nickname: 'Minh Anh', referral_code: 'MDMINHANH', referred_by_id: '', phone: '0987 654 321', role: 'investor', status: 'active', kyc_status: 'none', balance_vnd: '25000000', agency_title: 'TIER_1', total_packages_purchased: 12, created_at: new Date('2026-09-01').getTime() }] satisfies InvestorRow[]) : request<InvestorRow[]>('/api/v1/admin/users'),
   kyc: () => demoMode ? Promise.resolve(demoData.kyc) : request<KycRow[]>('/api/v1/admin/kyc'),
   deposits: () => demoMode ? Promise.resolve(demoData.deposits) : request<DepositRow[]>('/api/v1/admin/deposits'),
   transactions: () => demoMode ? Promise.resolve(demoData.transactions) : request<TransactionRow[]>('/api/v1/admin/transactions'),
+  confirmDeposit: (id: string, reviewNote: string) => demoMode ? Promise.resolve({ id, status: 'CONFIRMED' }) : request(`/api/v1/admin/deposits/${id}/confirm`, { method: 'POST', body: JSON.stringify({ review_note: reviewNote || undefined }) }),
+  rejectDeposit: (id: string, reviewNote: string) => demoMode ? Promise.resolve({ id, status: 'REJECTED' }) : request(`/api/v1/admin/deposits/${id}/reject`, { method: 'POST', body: JSON.stringify({ review_note: reviewNote || undefined }) }),
+  nftProducts: () => demoMode ? Promise.resolve(demoProducts) : request<NftProduct[]>('/api/v1/admin/nfts'),
+  createNftProduct: (product: SaveNftProduct) => demoMode ? Promise.resolve({ ...demoProducts[0], ...product, id: `demo-${Date.now()}`, imageUrl: product.image_url, metadataBaseUrl: product.metadata_base_url, unitPriceVnd: product.unit_price_vnd, totalSupply: product.total_supply, soldCount: 0, isActive: true }) : request<NftProduct>('/api/v1/admin/nfts', { method: 'POST', body: JSON.stringify(product) }),
+  updateNftProduct: (id: string, product: Partial<SaveNftProduct>) => demoMode ? Promise.resolve({ id, ...product }) : request<NftProduct>(`/api/v1/admin/nfts/${id}`, { method: 'PATCH', body: JSON.stringify(product) }),
   reviewKyc: (id: string, status: 'APPROVED' | 'REJECTED', reviewNote: string) => demoMode
     ? Promise.resolve({ id, status })
     : request(`/api/v1/admin/kyc/${id}/review`, { method: 'POST', body: JSON.stringify({ status, review_note: reviewNote, rejection_reason: status === 'REJECTED' ? reviewNote : undefined }) }),
@@ -357,8 +448,8 @@ export const api = {
     ? Promise.resolve({ direct_rate_percent: directRate, branch_rate_percent: branchRate, updated_at: new Date().toISOString() } satisfies ReferralSettings)
     : request<ReferralSettings>('/api/v1/admin/referrals/settings', { method: 'PATCH', body: JSON.stringify({ direct_rate_percent: directRate, branch_rate_percent: branchRate }) }),
   systemReferralCodes: () => demoMode ? Promise.resolve([] as SystemReferralCodeRow[]) : request<SystemReferralCodeRow[]>('/api/v1/admin/referrals/system-codes'),
-  createSystemReferralCode: (label: string) => request<SystemReferralCodeRow>('/api/v1/admin/referrals/system-codes', { method: 'POST', body: JSON.stringify({ label: label || undefined }) }),
-  setSystemReferralCodeActive: (id: string, isActive: boolean) => request(`/api/v1/admin/referrals/system-codes/${id}`, { method: 'PATCH', body: JSON.stringify({ is_active: isActive }) }),
+  createSystemReferralCode: (label: string) => demoMode ? Promise.resolve({ id: `demo-${Date.now()}`, code: `MD${Date.now().toString(36).toUpperCase()}`, label, isActive: true, createdAt: new Date().toISOString(), downline_count: 0, downline_sales_vnd: '0', branch_commission_vnd: '0', createdBy: { fullName: 'Admin', email: 'admin@mindo.local' } } satisfies SystemReferralCodeRow) : request<SystemReferralCodeRow>('/api/v1/admin/referrals/system-codes', { method: 'POST', body: JSON.stringify({ label: label || undefined }) }),
+  setSystemReferralCodeActive: (id: string, isActive: boolean) => demoMode ? Promise.resolve({ id, isActive }) : request(`/api/v1/admin/referrals/system-codes/${id}`, { method: 'PATCH', body: JSON.stringify({ is_active: isActive }) }),
   newsArticles: () => demoMode ? Promise.resolve(demoNewsArticles) : request<NewsArticle[]>('/api/v1/admin/news/articles?limit=50'),
   saveNewsArticle: (article: SaveNewsArticle & { id?: string }) => {
     if (demoMode) return Promise.resolve({ ...demoNewsArticles[0], ...article, id: article.id ?? `demo-${Date.now()}` });
