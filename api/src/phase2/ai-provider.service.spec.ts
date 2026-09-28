@@ -210,6 +210,30 @@ describe('AiProviderService', () => {
     expect(request.systemInstruction.parts[0].text).toContain('English');
   });
 
+  it('translates only the new input, never the earlier turns of the session', async () => {
+    /* Found on staging 28/09/2026: a Vietnamese → Korean request came back with
+       "사랑해" ("Anh yêu em", an earlier turn) and the previous meeting note
+       translated above the requested text. */
+    process.env.AI_MOCK = 'false';
+    process.env.GEMINI_API_KEY = 'gemini-key';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: '감사합니다' }] } }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new AiProviderService().generate(expert, AiMessageKind.TRANSLATION, 'Cảm ơn bạn', {
+      sourceLanguage: 'Tiếng Việt',
+      targetLanguage: '한국어',
+      history: [{ role: 'user', content: 'Anh yêu em' }, { role: 'assistant', content: 'I love you' }],
+    });
+
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body as string) as { contents: Array<{ parts: Array<{ text: string }> }> };
+    expect(request.contents).toHaveLength(1);
+    expect(request.contents[0].parts[0].text).toBe('Cảm ơn bạn');
+  });
+
   it('keeps mock responses local when providers are disabled', async () => {
     process.env.AI_MOCK = 'true';
     const fetchMock = vi.fn();
