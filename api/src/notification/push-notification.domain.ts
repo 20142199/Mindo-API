@@ -18,6 +18,13 @@ export type IncomingCallPushInput = {
   conversationId?: string | null;
 };
 
+export type WithdrawalPushInput = {
+  withdrawalId: string;
+  amountVnd: string;
+  status: 'APPROVED' | 'REJECTED';
+  reason?: string;
+};
+
 const pushBody = (messageType: string, content?: string | null) => {
   const value = content?.trim();
   if (value) return value.length > 140 ? `${value.slice(0, 137)}...` : value;
@@ -76,6 +83,35 @@ export function incomingCallPushMessage(tokens: string[], input: IncomingCallPus
     apns: {
       headers: { 'apns-priority': '10', 'apns-expiration': `${Math.floor(Date.now() / 1000) + 60}` },
       payload: { aps: { sound: 'default', category: 'INCOMING_CALL' } },
+    },
+  };
+}
+
+export function withdrawalPushMessage(tokens: string[], input: WithdrawalPushInput): MulticastMessage {
+  const approved = input.status === 'APPROVED';
+  return {
+    tokens,
+    notification: {
+      title: approved ? 'Rút tiền thành công' : 'Lệnh rút tiền bị từ chối',
+      body: approved
+        ? 'Tiền đã được chuyển đến tài khoản ngân hàng của bạn.'
+        : `Số tiền đã được hoàn lại vào tài khoản Mindo.${input.reason ? ` Lý do: ${input.reason}` : ''}`,
+    },
+    data: {
+      type: 'withdrawal_result',
+      withdrawal_id: input.withdrawalId,
+      withdrawal_status: input.status.toLowerCase(),
+      amount_vnd: input.amountVnd,
+      reason: input.reason ?? '',
+    },
+    android: {
+      priority: 'high',
+      collapseKey: `withdrawal:${input.withdrawalId}`,
+      notification: { channelId: 'mindo_transactions', sound: 'default', tag: input.withdrawalId },
+    },
+    apns: {
+      headers: { 'apns-priority': '10', 'apns-collapse-id': `withdrawal:${input.withdrawalId}` },
+      payload: { aps: { sound: 'default', threadId: 'mindo_transactions' } },
     },
   };
 }

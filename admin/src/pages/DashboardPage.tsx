@@ -1,6 +1,6 @@
-import { Box, CalendarDays, RefreshCw, Search, UserRoundCheck, WalletCards, Waypoints } from 'lucide-react';
+import { HandCoins, Box, CalendarDays, RefreshCw, Search, UserRoundCheck, Waypoints } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { api, type DashboardMetrics, type DepositRow, type KycRow, type TransactionRow } from '../api';
+import { api, type DashboardMetrics, type KycRow, type TransactionRow, type WithdrawalRow } from '../api';
 import type { RouteName } from '../components/AppShell';
 import { statusDisplay } from '../status';
 
@@ -19,11 +19,11 @@ export function DashboardPage({ onOpenKyc, onNavigate }: { onOpenKyc: (kyc: KycR
   async function load() {
     setError('');
     try {
-      const [nextMetrics, kyc, deposits, transactions] = await Promise.all([api.dashboard(), api.kyc(), api.deposits(), api.transactions()]);
+      const [nextMetrics, kyc, withdrawals, transactions] = await Promise.all([api.dashboard(), api.kyc(), api.withdrawals(), api.transactions()]);
       setMetrics(nextMetrics);
       setItems([
         ...kyc.map((row: KycRow): WorkItem => ({ id: row.id, type: 'KYC', name: row.fullName, email: row.user.email, status: row.status, createdAt: row.createdAt, kyc: row })),
-        ...deposits.map((row: DepositRow): WorkItem => ({ id: row.id, type: 'Nạp tiền', name: row.user.fullName, email: row.user.email, amount: row.amountVnd, status: row.status, createdAt: row.createdAt, route: 'deposits' })),
+        ...withdrawals.map((row: WithdrawalRow): WorkItem => ({ id: row.id, type: 'Rút tiền', name: row.user.fullName, email: row.user.email, amount: row.amountVnd, status: row.status, createdAt: row.createdAt, route: 'withdrawals' })),
         ...transactions.map((row: TransactionRow): WorkItem => ({ id: row.id, type: 'Mua Peer', name: row.user.fullName, email: row.user.email, amount: row.totalVnd, status: row.status, createdAt: row.createdAt, route: 'transactions' })),
       ].sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Không thể tải dữ liệu'); }
@@ -37,7 +37,7 @@ export function DashboardPage({ onOpenKyc, onNavigate }: { onOpenKyc: (kyc: KycR
 
   const cards = [
     { label: 'KYC chờ duyệt', value: metrics?.kyc_pending ?? '—', icon: UserRoundCheck },
-    { label: 'Lệnh nạp chờ thanh toán', value: metrics?.deposits_pending ?? '—', icon: WalletCards },
+    { label: 'Lệnh rút chờ duyệt', value: metrics?.withdrawals_pending ?? '—', icon: HandCoins },
     { label: 'Peer đã cấp', value: metrics?.nft_sold ?? '—', icon: Box },
     { label: 'Giao dịch cần kiểm tra', value: metrics?.transactions_need_review ?? '—', icon: Waypoints },
   ];
@@ -68,8 +68,8 @@ export function DashboardPage({ onOpenKyc, onNavigate }: { onOpenKyc: (kyc: KycR
 }
 
 function Status({ value, type }: { value: string; type: string }) {
-  if (type === 'Nạp tiền' && value === 'PENDING') return <span className="status warning">Chờ thanh toán</span>;
-  if (type === 'Nạp tiền' && value === 'CONFIRMED') return <span className="status success">Đã ghi có</span>;
+  if (type === 'Rút tiền' && value === 'PENDING') return <span className="status warning">Chờ duyệt</span>;
+  if (type === 'Rút tiền' && value === 'APPROVED') return <span className="status success">Đã chuyển tiền</span>;
   const status = statusDisplay(value);
   return <span className={`status ${status.tone}`}>{status.label}</span>;
 }

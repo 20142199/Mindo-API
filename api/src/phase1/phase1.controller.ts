@@ -7,7 +7,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthenticatedRequest, JwtAuthGuard, Roles, authUser } from '../auth/auth.guard';
 import { ok } from '../common/api-response';
 import { FileStorageService } from './file-storage.service';
-import { CalculatePriceDto, CreateArticleDto, CreateDepositDto, CreateKycDto, CreateNftProductDto, DepositReviewDto, InvestDto, MyNftQueryDto, ReviewDto, SnapshotPriceDto, UpdateNftProductDto, VietQrCallbackDto } from './phase1.dto';
+import { CalculatePriceDto, CreateArticleDto, CreateDepositDto, CreateKycDto, CreateNftProductDto, InvestDto, MyNftQueryDto, ReviewDto, SnapshotPriceDto, UpdateNftProductDto, VietQrCallbackDto } from './phase1.dto';
 import { Phase1Service } from './phase1.service';
 import { VietQrService } from './vietqr.service';
 
@@ -137,11 +137,6 @@ export class Phase1Controller {
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Roles(UserRole.ADMIN, UserRole.FINANCE) @Get('admin/deposits')
   deposits(@Query('status') status?: DepositStatus) { return this.service.listDeposits(undefined, status).then((data) => ok(data)); }
-
-  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Roles(UserRole.ADMIN, UserRole.FINANCE) @Post('admin/deposits/:id/reject')
-  rejectDeposit(@Req() req: AuthedRequest, @Param('id') id: string, @Body() dto: DepositReviewDto) {
-    return this.service.rejectDeposit(authUser(req).id, id, dto.review_note).then((data) => ok(data, 'Đã từ chối lệnh nạp'));
-  }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Roles(UserRole.ADMIN) @Get('admin/nfts')
   adminNfts() { return this.service.listProducts(false).then((data) => ok(data)); }

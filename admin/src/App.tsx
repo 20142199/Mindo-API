@@ -14,6 +14,7 @@ import { KycListPage } from './pages/KycListPage';
 import { DepositsPage } from './pages/DepositsPage';
 import { ProductsPage } from './pages/ProductsPage';
 import { TransactionsPage } from './pages/TransactionsPage';
+import { WithdrawalsPage } from './pages/WithdrawalsPage';
 
 export default function App() {
   const [route, setRoute] = useState<RouteName>('dashboard');
@@ -30,6 +31,7 @@ export default function App() {
   else if (route === 'ai-experts') content = <AiExpertsPage />;
   else if (route === 'news') content = <NewsPage />;
   else if (route === 'deposits') content = <DepositsPage />;
+  else if (route === 'withdrawals') content = <WithdrawalsPage />;
   else if (route === 'products') content = <ProductsPage />;
   else if (route === 'transactions') content = <TransactionsPage />;
   else content = <AdminAccountsPage />;

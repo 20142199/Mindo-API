@@ -256,14 +256,6 @@ export class Phase1Service {
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
-  async rejectDeposit(actorId: string, id: string, note?: string) {
-    const deposit = await this.prisma.deposit.findUniqueOrThrow({ where: { id } });
-    if (deposit.status !== DepositStatus.PENDING) return deposit;
-    const updated = await this.prisma.deposit.update({ where: { id }, data: { status: DepositStatus.REJECTED, reviewedAt: new Date(), reviewedById: actorId, reviewNote: note } });
-    await this.prisma.auditLog.create({ data: { actorId, action: 'DEPOSIT_REJECTED', entityType: 'Deposit', entityId: id } });
-    return updated;
-  }
-
   listProducts(activeOnly = true) {
     return this.prisma.nftProduct.findMany({ where: activeOnly ? { isActive: true } : {}, orderBy: { createdAt: 'desc' } });
   }
@@ -713,13 +705,14 @@ export class Phase1Service {
   }
 
   async dashboard() {
-    const [kycPending, depositsPending, sold, ordersNeedReview] = await Promise.all([
+    const [kycPending, depositsPending, withdrawalsPending, sold, ordersNeedReview] = await Promise.all([
       this.prisma.kycSubmission.count({ where: { status: ReviewStatus.PENDING } }),
       this.prisma.deposit.count({ where: { status: DepositStatus.PENDING } }),
+      this.prisma.withdrawal.count({ where: { status: 'PENDING' } }),
       this.prisma.nftAsset.count(),
       this.prisma.purchaseOrder.count({ where: { status: { in: [OrderStatus.PENDING, OrderStatus.FAILED] } } }),
     ]);
-    return { kyc_pending: kycPending, deposits_pending: depositsPending, nft_sold: sold, transactions_need_review: ordersNeedReview };
+    return { kyc_pending: kycPending, deposits_pending: depositsPending, withdrawals_pending: withdrawalsPending, nft_sold: sold, transactions_need_review: ordersNeedReview };
   }
 
   async users() {

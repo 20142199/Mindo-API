@@ -655,7 +655,7 @@ dd { color: var(--navy); font-size: 13px; font-weight: 500; }
 
 /* Operations: KYC, VietQR, Peer catalog and purchase transactions */
 .operations-page { max-width: none; }
-.operations-page.operations-drawer-open { display: grid; grid-template-columns: minmax(720px, 1fr) 420px; gap: 22px; }
+.operations-page.operations-drawer-open { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 22px; }
 .operations-main { min-width: 0; }
 .compact-filters { grid-template-columns: minmax(280px, 1fr) minmax(180px, 260px); }
 .single-filter { grid-template-columns: minmax(280px, 620px); }
@@ -672,6 +672,22 @@ dd { color: var(--navy); font-size: 13px; font-weight: 500; }
 .drawer-result span, .review-summary span { color: #657443; line-height: 18px; }
 .drawer-result.pending { border-color: #c9d8ef; color: #214d87; background: #f2f7fd; }
 .drawer-result.pending span { color: #60738e; }
+.withdrawal-review { display: grid; gap: 12px; padding: 18px 0 4px; }
+.withdrawal-review > h3, .withdrawal-reject h3, .withdrawal-result h3 { margin: 0; font-size: 14px; }
+.withdrawal-review label { display: grid; gap: 7px; color: #334a68; font-size: 12px; font-weight: 650; }
+.withdrawal-review input, .withdrawal-review textarea { width: 100%; min-height: 43px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; outline: 0; background: var(--surface-soft); font: inherit; }
+.withdrawal-review textarea { min-height: 72px; resize: vertical; }
+.withdrawal-review input:focus, .withdrawal-review textarea:focus { border-color: #99abc1; box-shadow: 0 0 0 4px rgba(2,28,65,.045); background: #fff; }
+.proof-upload > span:nth-child(2) { min-height: 46px; display: flex; align-items: center; gap: 9px; padding: 10px 12px; overflow: hidden; border: 1px dashed #aebed3; border-radius: 11px; color: var(--blue-dark); background: #f5f8fc; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.proof-upload input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.withdrawal-reject { display: grid; gap: 11px; margin-top: 6px; padding-top: 18px; border-top: 1px solid var(--border-soft); }
+.withdrawal-result { display: grid; gap: 10px; padding: 18px 0 4px; }
+.withdrawal-result dl { display: grid; gap: 10px; margin: 0; }
+.withdrawal-result dl > div { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 10px; font-size: 12px; }
+.withdrawal-result dt { color: var(--muted); }
+.withdrawal-result dd { margin: 0; color: var(--navy); font-weight: 650; overflow-wrap: anywhere; }
+.proof-preview { display: grid; gap: 8px; margin-top: 4px; color: var(--blue-dark); font-size: 12px; font-weight: 700; text-decoration: none; }
+.proof-preview img { width: 100%; max-height: 260px; object-fit: cover; object-position: top; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface-soft); }
 .pricing-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; margin-bottom: 20px; overflow: hidden; border: 1px solid var(--border-soft); border-radius: 16px; background: var(--border-soft); box-shadow: var(--shadow-sm); }
 .pricing-summary > div { min-height: 88px; display: grid; align-content: center; gap: 6px; padding: 15px 18px; background: #fff; }
 .pricing-summary small { color: var(--muted); font-size: 10px; }
@@ -705,12 +721,22 @@ dd { color: var(--navy); font-size: 13px; font-weight: 500; }
 
 @media (max-width: 1100px) {
   .operations-page.operations-drawer-open { grid-template-columns: 1fr; }
-  .operations-page .detail-drawer { position: static; height: auto; }
+  .operations-page .detail-drawer {
+    position: fixed;
+    z-index: 40;
+    top: 14px;
+    right: 14px;
+    bottom: 14px;
+    width: min(420px, calc(100vw - 28px));
+    height: auto;
+    box-shadow: 0 24px 70px rgba(2, 28, 65, .24);
+  }
   .product-form-grid { grid-template-columns: 1fr 1fr; }
 }
 
 @media (max-width: 760px) {
   .compact-filters, .single-filter, .pricing-summary, .product-form-grid { grid-template-columns: 1fr; }
+  .operations-page .detail-drawer { top: 8px; right: 8px; bottom: 8px; width: calc(100vw - 16px); }
   .pricing-summary > p, .product-form-grid .wide-field { grid-column: auto; }
   .heading-actions { width: 100%; }
   .heading-actions button { flex: 1; }

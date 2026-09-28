@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chatPushMessage, incomingCallPushMessage, isDeadFirebaseTarget } from './push-notification.domain';
+import { chatPushMessage, incomingCallPushMessage, isDeadFirebaseTarget, withdrawalPushMessage } from './push-notification.domain';
 
 describe('push notification payloads', () => {
   it('builds a navigable chat notification', () => {
@@ -32,5 +32,17 @@ describe('push notification payloads', () => {
   it('recognizes tokens that must be removed', () => {
     expect(isDeadFirebaseTarget('messaging/registration-token-not-registered')).toBe(true);
     expect(isDeadFirebaseTarget('messaging/server-unavailable')).toBe(false);
+  });
+
+  it('builds a successful withdrawal notification for the transaction channel', () => {
+    const message = withdrawalPushMessage(['token-1'], {
+      withdrawalId: 'withdrawal-1', amountVnd: '250000', status: 'APPROVED',
+    });
+    expect(message.notification).toEqual({
+      title: 'Rút tiền thành công',
+      body: 'Tiền đã được chuyển đến tài khoản ngân hàng của bạn.',
+    });
+    expect(message.data).toMatchObject({ type: 'withdrawal_result', withdrawal_status: 'approved', amount_vnd: '250000' });
+    expect(message.android?.notification?.channelId).toBe('mindo_transactions');
   });
 });

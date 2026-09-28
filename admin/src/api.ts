@@ -1,6 +1,7 @@
 export type DashboardMetrics = {
   kyc_pending: number;
   deposits_pending: number;
+  withdrawals_pending: number;
   nft_sold: number;
   transactions_need_review: number;
 };
@@ -63,6 +64,27 @@ export type DepositRow = {
   status: 'PENDING' | 'CONFIRMED' | 'REJECTED';
   createdAt: string;
   user: { id?: string; email: string; fullName: string; phone?: string; balanceVnd?: string };
+};
+
+export type WithdrawalRow = {
+  id: string;
+  amountVnd: string;
+  bankName: string;
+  bankAccountNumber: string;
+  bankAccountName: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  balanceBeforeVnd: string;
+  balanceAfterVnd: string;
+  reviewedAt?: string;
+  reviewNote?: string;
+  rejectionReason?: string;
+  transferProofFileId?: string;
+  bankTransactionCode?: string;
+  refundedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  transferProof?: { id: string; name: string; mime_type: string; size: number; url: string; public_url: string } | null;
+  user: { id: string; email: string; fullName: string; phone?: string; balanceVnd: string };
 };
 
 export type TransactionRow = {
@@ -349,13 +371,19 @@ const demoNewsSources: NewsSource[] = ['Investing.com', 'Forex Factory', 'CME Gr
 }));
 
 export const demoData = {
-  metrics: { kyc_pending: 28, deposits_pending: 41, nft_sold: 1256, transactions_need_review: 17 },
+  metrics: { kyc_pending: 28, deposits_pending: 41, withdrawals_pending: 2, nft_sold: 1256, transactions_need_review: 17 },
   kyc: [demoKyc],
   deposits: [
     { id: 'd1', amountVnd: '25000000', transferCode: 'MINDO-D1', status: 'PENDING', createdAt: '2026-09-07T03:15:00.000Z', expires_at: '2026-09-07T03:30:00.000Z', qr_expired: true, display_status: 'expired', vietqr: { bank_code: 'ACB', bank_account: '13989647', account_name: 'TRAN DUY HUNG', transfer_content: 'MINDO-D1', amount: 25000000 }, user: { fullName: 'Trần Quang Huy', email: 'huytq@gmail.com' } },
     { id: 'd2', amountVnd: '10000000', transferCode: 'MINDO-D2', status: 'CONFIRMED', createdAt: '2026-09-07T02:58:00.000Z', paidAt: '2026-09-07T03:01:00.000Z', bankTransactionId: 'ACB-DEMO-001', paidAmountVnd: '10000000', display_status: 'confirmed', user: { fullName: 'Lê Thị Bích Ngọc', email: 'ngocltb@gmail.com' } },
     { id: 'd3', amountVnd: '50000000', transferCode: 'MINDO-D3', status: 'PENDING', createdAt: '2026-09-07T01:47:00.000Z', expires_at: '2026-09-07T02:02:00.000Z', qr_expired: true, display_status: 'expired', user: { fullName: 'Đặng Quốc Bảo', email: 'baodq@gmail.com' } },
   ] satisfies DepositRow[],
+  withdrawals: [
+    { id: 'w1', amountVnd: '12500000', bankName: 'Ngân hàng Á Châu (ACB)', bankAccountNumber: '13989647', bankAccountName: 'TRAN QUANG HUY', status: 'PENDING', balanceBeforeVnd: '37500000', balanceAfterVnd: '25000000', createdAt: '2026-09-07T04:05:00.000Z', updatedAt: '2026-09-07T04:05:00.000Z', user: { id: 'u-w1', fullName: 'Trần Quang Huy', email: 'huytq@gmail.com', phone: '0988123456', balanceVnd: '25000000' } },
+    { id: 'w2', amountVnd: '5000000', bankName: 'Vietcombank', bankAccountNumber: '1029988112', bankAccountName: 'LE THI BICH NGOC', status: 'PENDING', balanceBeforeVnd: '18000000', balanceAfterVnd: '13000000', createdAt: '2026-09-07T03:42:00.000Z', updatedAt: '2026-09-07T03:42:00.000Z', user: { id: 'u-w2', fullName: 'Lê Thị Bích Ngọc', email: 'ngocltb@gmail.com', phone: '0909123456', balanceVnd: '13000000' } },
+    { id: 'w3', amountVnd: '3200000', bankName: 'Techcombank', bankAccountNumber: '1903892023', bankAccountName: 'PHAM DUY KHANG', status: 'APPROVED', balanceBeforeVnd: '9800000', balanceAfterVnd: '6600000', bankTransactionCode: 'TCB2609078821', reviewedAt: '2026-09-07T03:05:00.000Z', reviewNote: 'Đã chuyển khoản', createdAt: '2026-09-07T02:45:00.000Z', updatedAt: '2026-09-07T03:05:00.000Z', transferProof: { id: 'proof-w3', name: 'bien-lai.png', mime_type: 'image/png', size: 245000, url: 'https://placehold.co/720x960/eaf1f8/153a69?text=Bien+lai+chuyen+khoan', public_url: 'https://placehold.co/720x960/eaf1f8/153a69?text=Bien+lai+chuyen+khoan' }, user: { id: 'u-w3', fullName: 'Phạm Duy Khang', email: 'khangpd@gmail.com', phone: '0912345678', balanceVnd: '6600000' } },
+    { id: 'w4', amountVnd: '2000000', bankName: 'MB Bank', bankAccountNumber: '0901234567', bankAccountName: 'DO HONG PHUC', status: 'REJECTED', balanceBeforeVnd: '7000000', balanceAfterVnd: '5000000', rejectionReason: 'Thông tin chủ tài khoản không khớp', refundedAt: '2026-09-07T02:25:00.000Z', reviewedAt: '2026-09-07T02:25:00.000Z', createdAt: '2026-09-07T02:10:00.000Z', updatedAt: '2026-09-07T02:25:00.000Z', user: { id: 'u-w4', fullName: 'Đỗ Hồng Phúc', email: 'phucdh@gmail.com', phone: '0934567890', balanceVnd: '7000000' } },
+  ] satisfies WithdrawalRow[],
   transactions: [
     { id: 't1', productId: 'peer-1', quantity: 25, unitPriceVnd: '625000', totalVnd: '12500000', grossTotalVnd: '15625000', discountVnd: '3125000', effectiveDiscountRate: '0.2', agencyTitle: 'TIER_1', status: 'FAILED', createdAt: '2026-09-07T02:33:00.000Z', user: { fullName: 'Hoàng Văn Nam', email: 'namhv@gmail.com' }, product: { id: 'peer-1', name: 'Mindo Genesis', symbol: 'PEER', imageUrl: '' }, nftAssets: [] },
     { id: 't2', productId: 'peer-1', quantity: 5, unitPriceVnd: '625000', totalVnd: '2500000', grossTotalVnd: '3125000', discountVnd: '625000', effectiveDiscountRate: '0.2', agencyTitle: 'TIER_1', status: 'COMPLETED', createdAt: '2026-09-07T02:45:00.000Z', referralCode: 'MDABC123', user: { fullName: 'Phạm Duy Khang', email: 'khangpd@gmail.com' }, product: { id: 'peer-1', name: 'Mindo Genesis', symbol: 'PEER', imageUrl: '' }, nftAssets: Array.from({ length: 5 }, (_, index) => ({ id: `asset-${index}`, assetCode: `MINDO-T2-${index + 1}`, metadataUrl: '', issuedAt: '2026-09-07T02:45:00.000Z' })) },
@@ -393,6 +421,35 @@ export const api = {
   users: () => demoMode ? Promise.resolve([{ id: 'u-demo', email: 'minhanh.nguyen95@gmail.com', full_name: 'Nguyễn Minh Anh', nickname: 'Minh Anh', referral_code: 'MDMINHANH', referred_by_id: '', phone: '0987 654 321', role: 'investor', status: 'active', kyc_status: 'none', balance_vnd: '25000000', agency_title: 'TIER_1', total_packages_purchased: 12, created_at: new Date('2026-09-01').getTime() }] satisfies InvestorRow[]) : request<InvestorRow[]>('/api/v1/admin/users'),
   kyc: () => demoMode ? Promise.resolve(demoData.kyc) : request<KycRow[]>('/api/v1/admin/kyc'),
   deposits: () => demoMode ? Promise.resolve(demoData.deposits) : request<DepositRow[]>('/api/v1/admin/deposits'),
+  withdrawals: () => demoMode ? Promise.resolve(demoData.withdrawals) : request<WithdrawalRow[]>('/api/v1/admin/withdrawals'),
+  async uploadWithdrawalProof(file: File) {
+    if (demoMode) {
+      const previewUrl = URL.createObjectURL(file);
+      return { id: `proof-${Date.now()}`, name: file.name, mime_type: file.type, size: file.size, url: previewUrl, public_url: previewUrl };
+    }
+    const form = new FormData();
+    form.append('file', file);
+    const response = await fetch(`${API_URL}/api/v1/admin/withdrawals/proof/upload`, { method: 'POST', headers: { Authorization: `Bearer ${getToken()}` }, body: form });
+    const body = (await response.json()) as ApiEnvelope<{ id: string; name: string; mime_type: string; size: number; url: string; public_url: string }>;
+    if (!response.ok) throw new Error(body.message || 'Không thể tải ảnh chuyển khoản');
+    return body.data;
+  },
+  approveWithdrawal: (id: string, transactionCode: string, proofFileId: string, reviewNote: string) => {
+    if (demoMode) {
+      const row = demoData.withdrawals.find((item) => item.id === id);
+      if (row) Object.assign(row, { status: 'APPROVED', bankTransactionCode: transactionCode, transferProofFileId: proofFileId, reviewNote, reviewedAt: new Date().toISOString() });
+      return Promise.resolve(row);
+    }
+    return request<WithdrawalRow>(`/api/v1/admin/withdrawals/${id}/approve`, { method: 'POST', body: JSON.stringify({ transaction_code: transactionCode, transfer_proof_file_id: proofFileId, review_note: reviewNote || undefined }) });
+  },
+  rejectWithdrawal: (id: string, reason: string) => {
+    if (demoMode) {
+      const row = demoData.withdrawals.find((item) => item.id === id);
+      if (row) Object.assign(row, { status: 'REJECTED', rejectionReason: reason, reviewNote: reason, refundedAt: new Date().toISOString(), reviewedAt: new Date().toISOString(), user: { ...row.user, balanceVnd: row.balanceBeforeVnd } });
+      return Promise.resolve(row);
+    }
+    return request<WithdrawalRow>(`/api/v1/admin/withdrawals/${id}/reject`, { method: 'POST', body: JSON.stringify({ reason }) });
+  },
   transactions: () => demoMode ? Promise.resolve(demoData.transactions) : request<TransactionRow[]>('/api/v1/admin/transactions'),
   nftProducts: () => demoMode ? Promise.resolve(demoProducts) : request<NftProduct[]>('/api/v1/admin/nfts'),
   createNftProduct: (product: SaveNftProduct) => demoMode ? Promise.resolve({ ...demoProducts[0], ...product, id: `demo-${Date.now()}`, imageUrl: product.image_url, metadataBaseUrl: product.metadata_base_url, unitPriceVnd: product.unit_price_vnd, totalSupply: product.total_supply, soldCount: 0, isActive: true }) : request<NftProduct>('/api/v1/admin/nfts', { method: 'POST', body: JSON.stringify(product) }),

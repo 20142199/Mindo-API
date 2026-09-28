@@ -6,8 +6,10 @@ import {
   chatPushMessage,
   incomingCallPushMessage,
   isDeadFirebaseTarget,
+  withdrawalPushMessage,
   type ChatPushInput,
   type IncomingCallPushInput,
+  type WithdrawalPushInput,
 } from './push-notification.domain';
 
 @Injectable()
@@ -64,6 +66,10 @@ export class PushNotificationService implements OnModuleInit {
 
   async notifyIncomingCall(recipientUserId: string, input: IncomingCallPushInput) {
     return this.sendToUsers([recipientUserId], (tokens) => incomingCallPushMessage(tokens, input));
+  }
+
+  async notifyWithdrawalResult(recipientUserId: string, input: WithdrawalPushInput) {
+    return this.sendToUsers([recipientUserId], (tokens) => withdrawalPushMessage(tokens, input));
   }
 
   private firebaseApp(): App | undefined {

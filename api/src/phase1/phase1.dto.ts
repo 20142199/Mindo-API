@@ -31,10 +31,6 @@ export class CreateDepositDto {
   @IsOptional() @IsUrl({ require_tld: false }) proof_file_url?: string;
 }
 
-export class DepositReviewDto {
-  @IsOptional() @IsString() review_note?: string;
-}
-
 export class VietQrCallbackDto {
   @IsString() bankaccount!: string;
   @IsNumber() @Min(1) amount!: number;

@@ -4,7 +4,8 @@
 
 - NFT model: centrally managed Mindo asset, one unique internal asset code per purchased unit.
 - Ownership model: stored in the Mindo database; customers do not need a crypto wallet.
-- VND payments: VietQR generates the transfer instructions. A short-lived Bearer-authenticated callback confirms matching payments automatically; finance staff retain manual confirmation as a fallback.
+- VND deposits: VietQR generates the transfer instructions and a short-lived Bearer-authenticated callback confirms matching payments automatically. Admin does not credit deposits manually.
+- VND withdrawals: the API atomically holds the requested amount when a user creates an idempotent withdrawal. Admin or Finance approves it with bank transaction evidence, or rejects it with a reason and an atomic refund.
 - Commission and referral accounting: deferred to Phase 2 and kept off-chain initially.
 - News: API support is included, but it is not on the critical purchase path.
 - Contract upgradeability: disabled for the first release. New behavior is introduced with a versioned contract unless the governance model is approved.

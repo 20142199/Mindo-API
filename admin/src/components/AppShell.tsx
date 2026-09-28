@@ -1,9 +1,9 @@
-import { Bell, Bot, ChevronDown, FileText, GitBranch, Home, Landmark, LogOut, PanelLeftClose, ShieldCheck, Store, Users, WalletCards, Waypoints } from 'lucide-react';
+import { HandCoins, Bell, Bot, ChevronDown, FileText, GitBranch, Home, Landmark, LogOut, PanelLeftClose, ShieldCheck, Store, Users, WalletCards, Waypoints } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { clearToken } from '../api';
 import { BrandMark } from './BrandMark';
 
-export type RouteName = 'dashboard' | 'kyc' | 'agencies' | 'referrals' | 'ai-experts' | 'deposits' | 'products' | 'transactions' | 'news' | 'accounts';
+export type RouteName = 'dashboard' | 'kyc' | 'agencies' | 'referrals' | 'ai-experts' | 'deposits' | 'withdrawals' | 'products' | 'transactions' | 'news' | 'accounts';
 
 const nav = [
   { label: 'Tổng quan', icon: Home, route: 'dashboard' as RouteName },
@@ -12,6 +12,7 @@ const nav = [
   { label: 'Giới thiệu', icon: GitBranch, route: 'referrals' as RouteName },
   { label: 'AI chuyên gia', icon: Bot, route: 'ai-experts' as RouteName },
   { label: 'Nạp tiền', icon: WalletCards, route: 'deposits' as RouteName },
+  { label: 'Rút tiền', icon: HandCoins, route: 'withdrawals' as RouteName },
   { label: 'Sản phẩm Peer', icon: Landmark, route: 'products' as RouteName },
   { label: 'Giao dịch', icon: Waypoints, route: 'transactions' as RouteName },
   { label: 'Tin tức', icon: FileText, route: 'news' as RouteName },
@@ -25,6 +26,7 @@ const routeMeta: Record<RouteName, { title: string; description: string }> = {
   referrals: { title: 'Hệ thống giới thiệu', description: 'Cấu hình thưởng và theo dõi đầu nhánh' },
   'ai-experts': { title: 'AI chuyên gia', description: 'Cấu hình trợ lý Mindo' },
   deposits: { title: 'Nạp tiền VietQR', description: 'Đối soát và ghi có tự động' },
+  withdrawals: { title: 'Rút tiền', description: 'Duyệt chuyển khoản và hoàn tiền' },
   products: { title: 'Sản phẩm Peer', description: 'Nguồn cung và trạng thái mở bán' },
   transactions: { title: 'Giao dịch', description: 'Theo dõi đơn mua và Peer đã cấp' },
   news: { title: 'Trung tâm tin tức', description: 'Quản lý bài viết, Sóng và chuyên gia' },

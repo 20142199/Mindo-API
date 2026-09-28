@@ -32,6 +32,12 @@ enum DepositStatus {
   REJECTED
 }
 
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum OrderStatus {
   PENDING
   COMPLETED
@@ -207,6 +213,8 @@ model User {
   reviewedKyc                  KycSubmission[]        @relation("KycReviewer")
   deposits                     Deposit[]              @relation("DepositOwner")
   reviewedDeposits             Deposit[]              @relation("DepositReviewer")
+  withdrawals                  Withdrawal[]           @relation("WithdrawalOwner")
+  reviewedWithdrawals          Withdrawal[]           @relation("WithdrawalReviewer")
   purchaseOrders               PurchaseOrder[]
   nftAssets                    NftAsset[]
   ledgerEntries                LedgerEntry[]
@@ -513,6 +521,35 @@ model Deposit {
   @@index([userId, createdAt])
 }
 
+model Withdrawal {
+  id                    String           @id @default(cuid())
+  userId                String
+  amountVnd             Decimal          @db.Decimal(20, 0)
+  bankName              String
+  bankAccountNumber     String
+  bankAccountName       String
+  status                WithdrawalStatus @default(PENDING)
+  idempotencyKey        String
+  balanceBeforeVnd      Decimal          @db.Decimal(20, 0)
+  balanceAfterVnd       Decimal          @db.Decimal(20, 0)
+  reviewedById          String?
+  reviewedAt            DateTime?
+  reviewNote            String?
+  rejectionReason       String?
+  transferProofFileId   String?
+  bankTransactionCode   String?          @unique
+  refundedAt            DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  user                  User             @relation("WithdrawalOwner", fields: [userId], references: [id])
+  reviewedBy            User?            @relation("WithdrawalReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  ledgerEntries         LedgerEntry[]
+
+  @@unique([userId, idempotencyKey])
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+}
+
 model FileUpload {
   id           String   @id @default(cuid())
   ownerId      String
@@ -602,14 +639,17 @@ model LedgerEntry {
   orderId              String?             @unique
   commissionId         String?             @unique
   referralCommissionId String?             @unique
+  withdrawalId         String?
   createdAt            DateTime            @default(now())
   user                 User                @relation(fields: [userId], references: [id])
   deposit              Deposit?            @relation(fields: [depositId], references: [id])
   order                PurchaseOrder?      @relation(fields: [orderId], references: [id])
   commission           AgencyCommission?   @relation(fields: [commissionId], references: [id])
   referralCommission   ReferralCommission? @relation(fields: [referralCommissionId], references: [id])
+  withdrawal           Withdrawal?         @relation(fields: [withdrawalId], references: [id])
 
   @@index([userId, createdAt])
+  @@index([withdrawalId, createdAt])
 }
 
 model ReferralSetting {
