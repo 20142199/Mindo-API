@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { NewsEditorialStatus } from '@prisma/client';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../common/prisma.module';
 import { NewsAiSummaryService } from './news-ai-summary.service';
 import { NewsCrawlService } from './news-crawl.service';
@@ -94,3 +94,41 @@ describe('NewsCrawlService manual AI editorial', () => {
     expect(prisma.newsArticle.update.mock.calls[0][0].data.topicId).toBeNull();
   });
 });
+
+describe('NewsCrawlService image check', () => {
+  const service = setup({}).service;
+  const reply = (status: number, contentType: string) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers({ 'content-type': contentType }),
+    body: { cancel: vi.fn().mockResolvedValue(undefined) },
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('keeps an image the app can actually load', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(200, 'image/jpeg')));
+    await expect(service.usableImageUrl('https://media.zenfs.com/a.jpg')).resolves.toBe('https://media.zenfs.com/a.jpg');
+  });
+
+  it('drops a link that answers with a block page instead of an image', async () => {
+    // Forex Factory: mọi og:image là `…/image` và trả 403 kèm trang HTML của Cloudflare.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(403, 'text/html; charset=UTF-8')));
+    await expect(service.usableImageUrl('https://www.forexfactory.com/news/1-x/image')).resolves.toBeUndefined();
+  });
+
+  it('drops HTML served with 200, SVG, plain http and unreachable hosts', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(200, 'text/html')));
+    await expect(service.usableImageUrl('https://example.com/a')).resolves.toBeUndefined();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(reply(200, 'image/svg+xml')));
+    await expect(service.usableImageUrl('https://example.com/a.svg')).resolves.toBeUndefined();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(service.usableImageUrl('http://example.com/a.jpg')).resolves.toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('getaddrinfo ENOTFOUND')));
+    await expect(service.usableImageUrl('https://gone.example.com/a.jpg')).resolves.toBeUndefined();
+    await expect(service.usableImageUrl(undefined)).resolves.toBeUndefined();
+  });
+});
+
