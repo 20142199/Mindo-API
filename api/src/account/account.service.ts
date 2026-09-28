@@ -40,6 +40,10 @@ export class AccountService {
       avatar_file_id: avatar?.id ?? null,
       avatar: avatar?.ownerId === userId ? this.files.view(avatar) : null,
       account_type: user.agency?.status === 'APPROVED' ? 'business' : 'personal',
+      balance_vnd: user.balanceVnd.toString(),
+      agency_title: user.agencyTitle,
+      total_packages_purchased: user.totalPackagesPurchased,
+      referral_code: user.referralCode,
       bank_account: {
         account_name: user.bankAccountName ?? '',
         account_number: user.bankAccountNumber ?? '',

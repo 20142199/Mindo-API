@@ -193,6 +193,8 @@ model User {
   role                         UserRole               @default(INVESTOR)
   status                       UserStatus             @default(ACTIVE)
   balanceVnd                   Decimal                @default(0) @db.Decimal(20, 0)
+  agencyTitle                  String?
+  totalPackagesPurchased       Int                    @default(0)
   emailVerifiedAt              DateTime?
   termsAcceptedAt              DateTime?
   kycVerifiedAt                DateTime?
@@ -499,6 +501,7 @@ model Deposit {
   paidAt              DateTime?
   balanceBeforeVnd    Decimal?      @db.Decimal(20, 0)
   balanceAfterVnd     Decimal?      @db.Decimal(20, 0)
+  expiresAt           DateTime?
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
   user                User          @relation("DepositOwner", fields: [userId], references: [id])
@@ -506,6 +509,7 @@ model Deposit {
   ledgerEntry         LedgerEntry?
 
   @@index([status, createdAt])
+  @@index([status, expiresAt])
   @@index([userId, createdAt])
 }
 
@@ -541,26 +545,34 @@ model NftProduct {
 }
 
 model PurchaseOrder {
-  id                  String               @id @default(cuid())
-  userId              String
-  productId           String
-  quantity            Int
-  unitPriceVnd        Decimal              @db.Decimal(20, 0)
-  totalVnd            Decimal              @db.Decimal(20, 0)
-  idempotencyKey      String               @unique
-  status              OrderStatus          @default(PENDING)
-  agencyId            String?
-  commissionRate      Decimal?             @db.Decimal(5, 4)
-  commissionVnd       Decimal?             @db.Decimal(20, 0)
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
-  user                User                 @relation(fields: [userId], references: [id])
-  product             NftProduct           @relation(fields: [productId], references: [id])
-  ledgerEntry         LedgerEntry?
-  nftAssets           NftAsset[]
-  agency              Agency?              @relation(fields: [agencyId], references: [id])
-  agencyCommission    AgencyCommission?
-  referralCommissions ReferralCommission[]
+  id                    String               @id @default(cuid())
+  userId                String
+  productId             String
+  quantity              Int
+  unitPriceVnd          Decimal              @db.Decimal(20, 0)
+  totalVnd              Decimal              @db.Decimal(20, 0)
+  grossTotalVnd         Decimal?             @db.Decimal(20, 0)
+  discountVnd           Decimal?             @db.Decimal(20, 0)
+  effectiveDiscountRate Decimal?             @db.Decimal(5, 4)
+  agencyTitle           String?
+  unitPriceUsd          Decimal?             @db.Decimal(10, 2)
+  usdVndRate            Decimal?             @db.Decimal(20, 4)
+  pricingBreakdown      Json?
+  referralCode          String?
+  idempotencyKey        String               @unique
+  status                OrderStatus          @default(PENDING)
+  agencyId              String?
+  commissionRate        Decimal?             @db.Decimal(5, 4)
+  commissionVnd         Decimal?             @db.Decimal(20, 0)
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  user                  User                 @relation(fields: [userId], references: [id])
+  product               NftProduct           @relation(fields: [productId], references: [id])
+  ledgerEntry           LedgerEntry?
+  nftAssets             NftAsset[]
+  agency                Agency?              @relation(fields: [agencyId], references: [id])
+  agencyCommission      AgencyCommission?
+  referralCommissions   ReferralCommission[]
 
   @@index([status, createdAt])
 }

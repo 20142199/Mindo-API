@@ -47,6 +47,9 @@ export class HistoryService {
         collection_name: row.product.name,
         quantity: row.quantity,
         nft_codes: row.nftAssets.map((asset) => asset.assetCode),
+        agency_title: row.agencyTitle,
+        gross_amount_vnd: row.grossTotalVnd?.toString() ?? row.totalVnd.toString(),
+        discount_vnd: row.discountVnd?.toString() ?? '0',
         amount_vnd: row.totalVnd.toString(),
         status,
         status_label: historyLabels[status],
@@ -80,6 +83,14 @@ export class HistoryService {
       status_label: historyLabels[status],
       title: status === HistoryStatus.COMPLETED ? 'Mua NFT thành công' : `Mua NFT · ${historyLabels[status]}`,
       amount_vnd: row.totalVnd.toString(),
+      gross_amount_vnd: row.grossTotalVnd?.toString() ?? row.totalVnd.toString(),
+      discount_vnd: row.discountVnd?.toString() ?? '0',
+      discount_percent: row.effectiveDiscountRate?.mul(100).toString() ?? '0',
+      agency_title: row.agencyTitle,
+      unit_price_usd: row.unitPriceUsd?.toString() ?? null,
+      usd_vnd_rate: row.usdVndRate?.toString() ?? null,
+      pricing_breakdown: row.pricingBreakdown ?? [],
+      referral_code: row.referralCode,
       occurred_at: row.createdAt.toISOString(),
       overview: {
         collection_id: row.productId,
@@ -125,6 +136,7 @@ export class HistoryService {
     ]);
     const items = rows.map((row) => {
       const status = depositHistoryStatus(row.status);
+      const qrExpired = row.status === DepositStatus.PENDING && Boolean(row.expiresAt && row.expiresAt <= new Date());
       return {
         id: row.id,
         type: 'deposit',
@@ -132,6 +144,8 @@ export class HistoryService {
         source: 'VIETQR',
         amount_vnd: row.amountVnd.toString(),
         status,
+        qr_expired: qrExpired,
+        expires_at: row.expiresAt?.toISOString() ?? null,
         status_label: historyLabels[status],
         status_message: status === HistoryStatus.PENDING
           ? 'Giao dịch đã ghi nhận, đang chờ đối soát với ngân hàng. Thường hoàn tất trong 5–10 phút.'
@@ -154,12 +168,15 @@ export class HistoryService {
     const row = await this.prisma.deposit.findFirst({ where: { id, userId } });
     if (!row) throw new NotFoundException('Không tìm thấy giao dịch nạp tiền');
     const status = depositHistoryStatus(row.status);
+    const qrExpired = row.status === DepositStatus.PENDING && Boolean(row.expiresAt && row.expiresAt <= new Date());
     const occurredAt = row.paidAt ?? row.reviewedAt ?? row.createdAt;
     return {
       id: row.id,
       transaction_code: row.bankTransactionId ?? row.transferCode,
       type: 'deposit',
       status,
+      qr_expired: qrExpired,
+      expires_at: row.expiresAt?.toISOString() ?? null,
       status_label: historyLabels[status],
       status_message: status === HistoryStatus.PENDING
         ? 'Giao dịch đã ghi nhận, đang chờ đối soát với ngân hàng. Thường hoàn tất trong 5–10 phút.'

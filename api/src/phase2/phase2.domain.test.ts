@@ -9,9 +9,9 @@ import {
 
 describe('phase 2 domain rules', () => {
   it('maps cumulative package totals to the three agency titles', () => {
-    expect(agencyTierForTotal(1)).toMatchObject({ code: 'TIER_1', label: 'Đại lý 1', discountRate: 0.2 });
-    expect(agencyTierForTotal(50)).toMatchObject({ code: 'TIER_2', label: 'Đại lý 2', discountRate: 0.3 });
-    expect(agencyTierForTotal(200)).toMatchObject({ code: 'TIER_3', label: 'Đại lý 3', discountRate: 0.4 });
+    expect(agencyTierForTotal(1)).toMatchObject({ code: 'TIER_1', label: 'Đại lý Hoàng Kim', discountRate: 0.2 });
+    expect(agencyTierForTotal(50)).toMatchObject({ code: 'TIER_2', label: 'Đại lý Bạch Kim', discountRate: 0.3 });
+    expect(agencyTierForTotal(200)).toMatchObject({ code: 'TIER_3', label: 'Đại lý Kim Cương', discountRate: 0.4 });
   });
 
   it('applies the higher discount only from the package that reaches its threshold', () => {

@@ -7,9 +7,9 @@ export type AgencyTier = {
 };
 
 export const agencyTiers: AgencyTier[] = [
-  { code: 'TIER_1', label: 'Đại lý 1', discountRate: 0.20, fromPackage: 1, toPackage: 49 },
-  { code: 'TIER_2', label: 'Đại lý 2', discountRate: 0.30, fromPackage: 50, toPackage: 199 },
-  { code: 'TIER_3', label: 'Đại lý 3', discountRate: 0.40, fromPackage: 200, toPackage: null },
+  { code: 'TIER_1', label: 'Đại lý Hoàng Kim', discountRate: 0.20, fromPackage: 1, toPackage: 49 },
+  { code: 'TIER_2', label: 'Đại lý Bạch Kim', discountRate: 0.30, fromPackage: 50, toPackage: 199 },
+  { code: 'TIER_3', label: 'Đại lý Kim Cương', discountRate: 0.40, fromPackage: 200, toPackage: null },
 ];
 
 export function agencyTierForTotal(totalPackages: number): AgencyTier {

@@ -60,6 +60,8 @@ export function userView(user: User) {
     created_at: user.createdAt.getTime(),
     updated_at: user.updatedAt.getTime(),
     balance_vnd: user.balanceVnd.toString(),
+    agency_title: user.agencyTitle,
+    total_packages_purchased: user.totalPackagesPurchased,
     email_verified_at: user.emailVerifiedAt?.getTime() ?? 0,
     terms_accepted_at: user.termsAcceptedAt?.getTime() ?? 0,
   };

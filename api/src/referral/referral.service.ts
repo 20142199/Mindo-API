@@ -1,8 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { OrderStatus, Prisma, ReferralCommissionType } from '@prisma/client';
 import { PrismaService } from '../common/prisma.module';
-import { CreateSystemReferralCodeDto, UpdateReferralSettingsDto } from './referral.dto';
+import { CreateSystemReferralCodeDto, ReferralCommissionQueryDto, ReferralPeriodQueryDto, UpdateReferralSettingsDto } from './referral.dto';
 import { percentToRate, rateToPercent, referralCode } from './referral.domain';
+import { pageExtra } from '../common/api-response';
 
 const SETTINGS_ID = 'default';
 
@@ -150,13 +151,15 @@ export class ReferralService {
     client: Prisma.TransactionClient,
     order: { id: string; totalVnd: Prisma.Decimal },
     buyer: { id: string; referredById: string | null },
+    purchaseReferrerId?: string | null,
   ) {
     const settings = await this.settings(client);
     const awards: Array<{ beneficiaryId: string; type: ReferralCommissionType; rate: Prisma.Decimal }> = [];
-    if (buyer.referredById && buyer.referredById !== buyer.id) {
-      awards.push({ beneficiaryId: buyer.referredById, type: ReferralCommissionType.DIRECT, rate: settings.directRate });
+    const directReferrerId = purchaseReferrerId ?? buyer.referredById;
+    if (directReferrerId && directReferrerId !== buyer.id) {
+      awards.push({ beneficiaryId: directReferrerId, type: ReferralCommissionType.DIRECT, rate: settings.directRate });
     }
-    const branchRootId = await this.findBranchRoot(client, buyer.referredById);
+    const branchRootId = await this.findBranchRoot(client, directReferrerId);
     if (branchRootId && branchRootId !== buyer.id) {
       awards.push({ beneficiaryId: branchRootId, type: ReferralCommissionType.BRANCH, rate: settings.branchRate });
     }
@@ -227,5 +230,173 @@ export class ReferralService {
       recent_commissions: recent,
     };
   }
-}
 
+  async commissions(userId: string, query: ReferralCommissionQueryDto) {
+    const createdAt = this.period(query.from, query.to);
+    const where: Prisma.ReferralCommissionWhereInput = {
+      beneficiaryId: userId,
+      ...(query.type ? { type: query.type } : {}),
+      ...(createdAt ? { createdAt } : {}),
+    };
+    const [total, rows, sum, exchange] = await Promise.all([
+      this.prisma.referralCommission.count({ where }),
+      this.prisma.referralCommission.findMany({
+        where,
+        include: {
+          buyer: { select: { id: true, fullName: true, email: true, referralCode: true } },
+          order: { include: { product: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      }),
+      this.prisma.referralCommission.aggregate({ where, _sum: { amountVnd: true } }),
+      this.prisma.agencyPackageSetting.findUnique({ where: { id: 'default' } }),
+    ]);
+    const usdVndRate = exchange?.usdVndRate ?? new Prisma.Decimal(25_000);
+    const totalVnd = sum._sum.amountVnd ?? new Prisma.Decimal(0);
+    return {
+      data: {
+        summary: {
+          total_commission_vnd: totalVnd.toString(),
+          total_commission_usd: totalVnd.div(usdVndRate).toFixed(2),
+          usd_vnd_rate: usdVndRate.toString(),
+          transaction_count: total,
+        },
+        items: rows.map((row) => this.commissionView(row, usdVndRate)),
+        applied_filters: { from: query.from ?? null, to: query.to ?? null, type: query.type ?? null },
+      },
+      extra: pageExtra(query.page, query.limit, total),
+    };
+  }
+
+  async commissionDetail(userId: string, id: string) {
+    const [row, exchange] = await Promise.all([
+      this.prisma.referralCommission.findFirst({
+        where: { id, beneficiaryId: userId },
+        include: {
+          buyer: { select: { id: true, fullName: true, email: true, referralCode: true } },
+          order: { include: { product: true } },
+        },
+      }),
+      this.prisma.agencyPackageSetting.findUnique({ where: { id: 'default' } }),
+    ]);
+    if (!row) throw new NotFoundException('Không tìm thấy giao dịch hoa hồng');
+    return this.commissionView(row, exchange?.usdVndRate ?? new Prisma.Decimal(25_000));
+  }
+
+  async branchSales(userId: string, query: ReferralPeriodQueryDto) {
+    const root = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { claimedSystemReferralCode: { select: { code: true, label: true, claimedAt: true } } },
+    });
+    if (!root.claimedSystemReferralCode) throw new ForbiddenException('Chỉ tài khoản nhận mã ref tổng mới được xem doanh số đầu nhánh');
+    const descendants = await this.descendantIds(userId);
+    const createdAt = this.period(query.from, query.to);
+    const orderWhere: Prisma.PurchaseOrderWhereInput = {
+      userId: { in: descendants },
+      status: OrderStatus.COMPLETED,
+      ...(createdAt ? { createdAt } : {}),
+    };
+    const commissionWhere: Prisma.ReferralCommissionWhereInput = {
+      beneficiaryId: userId,
+      type: ReferralCommissionType.BRANCH,
+      ...(createdAt ? { createdAt } : {}),
+    };
+    const [total, rows, sales, rewards, exchange] = await Promise.all([
+      descendants.length ? this.prisma.purchaseOrder.count({ where: orderWhere }) : Promise.resolve(0),
+      descendants.length ? this.prisma.purchaseOrder.findMany({
+        where: orderWhere,
+        include: { user: { select: { id: true, fullName: true, email: true } }, product: true },
+        orderBy: { createdAt: 'desc' },
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+      }) : Promise.resolve([]),
+      descendants.length ? this.prisma.purchaseOrder.aggregate({ where: orderWhere, _sum: { totalVnd: true, quantity: true } }) : Promise.resolve({ _sum: { totalVnd: null, quantity: null } }),
+      this.prisma.referralCommission.aggregate({ where: commissionWhere, _sum: { amountVnd: true } }),
+      this.prisma.agencyPackageSetting.findUnique({ where: { id: 'default' } }),
+    ]);
+    const usdVndRate = exchange?.usdVndRate ?? new Prisma.Decimal(25_000);
+    const totalSalesVnd = sales._sum.totalVnd ?? new Prisma.Decimal(0);
+    const rewardVnd = rewards._sum.amountVnd ?? new Prisma.Decimal(0);
+    return {
+      data: {
+        system_code: root.claimedSystemReferralCode,
+        period: { from: query.from ?? null, to: query.to ?? null },
+        metrics: {
+          downline_count: descendants.length,
+          order_count: total,
+          total_peer: sales._sum.quantity ?? 0,
+          total_sales_vnd: totalSalesVnd.toString(),
+          total_sales_usd: totalSalesVnd.div(usdVndRate).toFixed(2),
+          branch_reward_vnd: rewardVnd.toString(),
+          branch_reward_usd: rewardVnd.div(usdVndRate).toFixed(2),
+          usd_vnd_rate: usdVndRate.toString(),
+        },
+        orders: rows.map((row) => ({
+          id: row.id,
+          transaction_code: `TX#${row.id.slice(-8).toUpperCase()}`,
+          buyer: { id: row.user.id, full_name: row.user.fullName, email: row.user.email },
+          product: { id: row.product.id, name: row.product.name, symbol: row.product.symbol },
+          quantity: row.quantity,
+          amount_vnd: row.totalVnd.toString(),
+          amount_usd: row.totalVnd.div(usdVndRate).toFixed(2),
+          occurred_at: row.createdAt.toISOString(),
+        })),
+      },
+      extra: pageExtra(query.page, query.limit, total),
+    };
+  }
+
+  private commissionView(row: {
+    id: string;
+    type: ReferralCommissionType;
+    rate: Prisma.Decimal;
+    amountVnd: Prisma.Decimal;
+    createdAt: Date;
+    buyer: { id: string; fullName: string; email: string; referralCode: string };
+    order: {
+      id: string;
+      quantity: number;
+      unitPriceVnd: Prisma.Decimal;
+      totalVnd: Prisma.Decimal;
+      grossTotalVnd: Prisma.Decimal | null;
+      discountVnd: Prisma.Decimal | null;
+      effectiveDiscountRate: Prisma.Decimal | null;
+      agencyTitle: string | null;
+      product: { id: string; name: string; symbol: string };
+    };
+  }, usdVndRate: Prisma.Decimal) {
+    return {
+      id: row.id,
+      type: row.type.toLowerCase(),
+      rate_percent: row.rate.mul(100).toString(),
+      amount_vnd: row.amountVnd.toString(),
+      amount_usd: row.amountVnd.div(usdVndRate).toFixed(2),
+      usd_vnd_rate: usdVndRate.toString(),
+      status: 'credited',
+      buyer: { id: row.buyer.id, full_name: row.buyer.fullName, email: row.buyer.email, referral_code: row.buyer.referralCode },
+      order: {
+        id: row.order.id,
+        transaction_code: `TX#${row.order.id.slice(-8).toUpperCase()}`,
+        product: { id: row.order.product.id, name: row.order.product.name, symbol: row.order.product.symbol },
+        quantity: row.order.quantity,
+        gross_amount_vnd: row.order.grossTotalVnd?.toString() ?? row.order.totalVnd.toString(),
+        discount_vnd: row.order.discountVnd?.toString() ?? '0',
+        net_amount_vnd: row.order.totalVnd.toString(),
+        discount_percent: row.order.effectiveDiscountRate?.mul(100).toString() ?? '0',
+        agency_title: row.order.agencyTitle,
+      },
+      calculation: `${row.order.totalVnd.toString()} × ${row.rate.mul(100).toString()}%`,
+      credited_at: row.createdAt.toISOString(),
+    };
+  }
+
+  private period(from?: string, to?: string) {
+    if (!from && !to) return undefined;
+    const start = from ? new Date(from) : undefined;
+    const end = to ? new Date(to.length === 10 ? `${to}T23:59:59.999Z` : to) : undefined;
+    if (start && end && start > end) throw new BadRequestException('Khoảng thời gian không hợp lệ');
+    return { ...(start ? { gte: start } : {}), ...(end ? { lte: end } : {}) };
+  }
+}

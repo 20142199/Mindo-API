@@ -9,6 +9,32 @@ import { CreateArticleDto, CreateDepositDto, CreateKycDto, CreateNftProductDto, 
 import { requireAvailableSupply } from './domain';
 import { generateNumericOrderId, VietQrService } from './vietqr.service';
 import { ReferralService } from '../referral/referral.service';
+import { agencyTiers, priceAgencyPackages } from '../phase2/phase2.domain';
+import { isReferralCodeShape } from '../referral/referral.domain';
+import { pageExtra } from '../common/api-response';
+
+type SignedPurchaseQuote = {
+  sub: string;
+  jti: string;
+  payment_type: string;
+  amount: number;
+  nft_id: string;
+  price_nft: string;
+  total_vnd: string;
+  gross_total_vnd: string;
+  discount_vnd: string;
+  effective_discount_rate: number;
+  agency_title: string;
+  agency_title_label: string;
+  unit_price_usd: string;
+  usd_vnd_rate: string;
+  starting_package_number: number;
+  ending_package_number: number;
+  pricing_breakdown: Array<Record<string, unknown>>;
+  referral_code: string | null;
+  referrer_id: string | null;
+  agency_id: string | null;
+};
 
 @Injectable()
 export class Phase1Service {
@@ -140,6 +166,8 @@ export class Phase1Service {
     const transferCode = `MI${Date.now().toString(36).toUpperCase()}`;
     const vietQrOrderId = generateNumericOrderId();
     const qr = await this.vietQr.generate(amount.toNumber(), transferCode, vietQrOrderId);
+    const qrTtlMinutes = Math.min(60, Math.max(5, Number(process.env.VIETQR_QR_TTL_MINUTES ?? 15)));
+    const expiresAt = new Date(Date.now() + qrTtlMinutes * 60_000);
     const created = await this.prisma.deposit.create({
       data: {
         userId,
@@ -150,6 +178,7 @@ export class Phase1Service {
         vietQrOrderId: qr.order_id,
         qrCodeUrl: qr.qr_code,
         vietQrData: qr as unknown as Prisma.InputJsonValue,
+        expiresAt,
       },
     });
     return this.depositView(created);
@@ -256,34 +285,82 @@ export class Phase1Service {
     return this.prisma.nftProduct.findMany({ where: activeOnly ? { isActive: true } : {}, orderBy: { createdAt: 'desc' } });
   }
 
+  async productDetail(id: string) {
+    const product = await this.prisma.nftProduct.findFirst({ where: { id, isActive: true } });
+    if (!product) throw new NotFoundException('NFT không tồn tại');
+    return {
+      ...product,
+      available_supply: Math.max(0, product.totalSupply - product.soldCount),
+      ownership_system: 'MINDO_INTERNAL',
+      blockchain_transaction: null,
+      transaction_fee_vnd: '0',
+    };
+  }
+
   createProduct(dto: CreateNftProductDto) {
     return this.prisma.nftProduct.create({
       data: { name: dto.name, symbol: dto.symbol, description: dto.description, imageUrl: dto.image_url, metadataBaseUrl: dto.metadata_base_url, unitPriceVnd: new Prisma.Decimal(dto.unit_price_vnd), totalSupply: dto.total_supply },
     });
   }
 
-  async calculatePrice(productId: string, quantity: number) {
-    const product = await this.prisma.nftProduct.findUnique({ where: { id: productId } });
-    if (!product?.isActive) throw new NotFoundException('NFT không tồn tại');
-    requireAvailableSupply(product.totalSupply, product.soldCount, quantity);
-    return { amount: quantity, nft_id: product.id, price_nft: product.unitPriceVnd.toString(), total_vnd: product.unitPriceVnd.mul(quantity).toString() };
+  async purchaseConfig(userId: string, productId?: string) {
+    const [user, settings, product] = await Promise.all([
+      this.prisma.user.findUniqueOrThrow({ where: { id: userId } }),
+      this.packageSettings(),
+      productId
+        ? this.prisma.nftProduct.findFirst({ where: { id: productId, isActive: true } })
+        : this.prisma.nftProduct.findFirst({ where: { isActive: true }, orderBy: { createdAt: 'asc' } }),
+    ]);
+    if (!product) throw new NotFoundException('NFT không tồn tại');
+    const unitPriceVnd = settings.basePriceUsd.mul(settings.usdVndRate).toDecimalPlaces(0);
+    return {
+      product: await this.productDetail(product.id),
+      base_price_usd: settings.basePriceUsd.toString(),
+      usd_vnd_rate: settings.usdVndRate.toString(),
+      unit_price_vnd: unitPriceVnd.toString(),
+      max_quantity_per_order: 500,
+      current_title: user.agencyTitle,
+      total_packages_purchased: user.totalPackagesPurchased,
+      balance_vnd: user.balanceVnd.toString(),
+      kyc_verified: Boolean(user.kycVerifiedAt),
+      tiers: agencyTiers.map((tier) => ({
+        code: tier.code,
+        title: tier.label,
+        from_package: tier.fromPackage,
+        to_package: tier.toPackage,
+        discount_percent: tier.discountRate * 100,
+      })),
+      updated_at: settings.updatedAt,
+    };
   }
 
-  async createSnapshot(userId: string, productId: string, quantity: number, paymentType: string) {
-    const price = await this.calculatePrice(productId, quantity);
+  async calculatePrice(userId: string, productId: string, quantity: number, referralCode?: string) {
+    const quote = await this.buildPurchaseQuote(userId, productId, quantity, referralCode);
+    const { referrer_id: _referrerId, agency_id: _agencyId, ...publicQuote } = quote;
+    return publicQuote;
+  }
+
+  async createSnapshot(userId: string, productId: string, quantity: number, paymentType: string, referralCode?: string) {
+    if (paymentType.toUpperCase() !== 'BALANCE') throw new BadRequestException('Hiện chỉ hỗ trợ thanh toán bằng số dư Mindo');
+    const price = await this.buildPurchaseQuote(userId, productId, quantity, referralCode);
     const jti = `${userId}:${productId}:${Date.now()}`;
-    const snapshot = await this.jwt.signAsync({ ...price, sub: userId, payment_type: paymentType, jti }, { secret: process.env.JWT_ACCESS_SECRET, expiresIn: '10m' });
-    return { ...price, price_snapshot: snapshot, expires_in: 600 };
+    const signedQuote: SignedPurchaseQuote = { ...price, sub: userId, payment_type: 'BALANCE', jti };
+    const snapshot = await this.jwt.signAsync(signedQuote, { secret: process.env.JWT_ACCESS_SECRET, expiresIn: '10m' });
+    const { referrer_id: _referrerId, agency_id: _agencyId, ...publicPrice } = price;
+    return { ...publicPrice, price_snapshot: snapshot, expires_in: 600 };
   }
 
-  async purchase(userId: string, snapshot: string, agencyCode?: string) {
-    let quote: { sub: string; nft_id: string; amount: number; price_nft: string; total_vnd: string; jti: string };
+  async purchase(userId: string, snapshot: string, legacyAgencyCode?: string, submittedReferralCode?: string) {
+    let quote: SignedPurchaseQuote;
     try { quote = await this.jwt.verifyAsync(snapshot, { secret: process.env.JWT_ACCESS_SECRET }); }
     catch { throw new BadRequestException('Báo giá không hợp lệ hoặc đã hết hạn'); }
     if (quote.sub !== userId) throw new BadRequestException('Báo giá không thuộc người dùng hiện tại');
+    if (submittedReferralCode && submittedReferralCode.toUpperCase() !== (quote.referral_code ?? '').toUpperCase()) {
+      throw new BadRequestException('Mã giới thiệu không khớp với báo giá');
+    }
     const idempotencyKey = `snapshot:${quote.jti}`;
     const existing = await this.prisma.purchaseOrder.findUnique({ where: { idempotencyKey }, include: { nftAssets: true } });
-    if (existing) return existing;
+    if (existing) return this.purchaseOrderView(existing);
 
     return this.prisma.$transaction(async (tx) => {
       const user = await tx.user.findUniqueOrThrow({ where: { id: userId } });
@@ -291,8 +368,15 @@ export class Phase1Service {
       const total = new Prisma.Decimal(quote.total_vnd);
       if (!user.kycVerifiedAt) throw new BadRequestException('Cần hoàn tất KYC trước khi mua NFT');
       if (user.balanceVnd.lessThan(total)) throw new BadRequestException('Số dư không đủ');
+      if (user.totalPackagesPurchased + 1 !== quote.starting_package_number) {
+        throw new BadRequestException('Danh hiệu hoặc số lượng sở hữu đã thay đổi, vui lòng lấy báo giá mới');
+      }
       requireAvailableSupply(product.totalSupply, product.soldCount, quote.amount);
-      const agency = agencyCode ? await tx.agency.findUnique({
+      const agencyCode = quote.agency_id ? null : legacyAgencyCode;
+      const agency = quote.agency_id ? await tx.agency.findUnique({
+        where: { id: quote.agency_id },
+        include: { store: true, packages: { where: { status: 'ACTIVE', remainingCommissionSlots: { gt: 0 } }, orderBy: { createdAt: 'asc' }, take: 1 } },
+      }) : agencyCode ? await tx.agency.findUnique({
         where: { code: agencyCode.toUpperCase() },
         include: { store: true, packages: { where: { status: 'ACTIVE', remainingCommissionSlots: { gt: 0 } }, orderBy: { createdAt: 'asc' }, take: 1 } },
       }) : null;
@@ -308,6 +392,14 @@ export class Phase1Service {
           quantity: quote.amount,
           unitPriceVnd: new Prisma.Decimal(quote.price_nft),
           totalVnd: total,
+          grossTotalVnd: new Prisma.Decimal(quote.gross_total_vnd),
+          discountVnd: new Prisma.Decimal(quote.discount_vnd),
+          effectiveDiscountRate: new Prisma.Decimal(quote.effective_discount_rate),
+          agencyTitle: quote.agency_title,
+          unitPriceUsd: new Prisma.Decimal(quote.unit_price_usd),
+          usdVndRate: new Prisma.Decimal(quote.usd_vnd_rate),
+          pricingBreakdown: quote.pricing_breakdown as Prisma.InputJsonValue,
+          referralCode: quote.referral_code,
           idempotencyKey,
           status: OrderStatus.COMPLETED,
           agencyId: activePackage ? agency?.id : undefined,
@@ -324,7 +416,15 @@ export class Phase1Service {
           },
         });
       }
-      await tx.user.update({ where: { id: userId }, data: { balanceVnd: { decrement: total } } });
+      const updatedUser = await tx.user.update({
+        where: { id: userId },
+        data: {
+          balanceVnd: { decrement: total },
+          totalPackagesPurchased: quote.ending_package_number,
+          agencyTitle: quote.agency_title,
+          referredById: quote.referrer_id && !user.referredById ? quote.referrer_id : undefined,
+        },
+      });
       await tx.nftProduct.update({ where: { id: product.id }, data: { soldCount: { increment: quote.amount } } });
       await tx.ledgerEntry.create({ data: { userId, amountVnd: total, direction: 'DEBIT', description: `Mua ${quote.amount} ${product.name}`, orderId: created.id } });
       const assets = Array.from({ length: quote.amount }, (_, index) => ({
@@ -350,12 +450,13 @@ export class Phase1Service {
         });
       }
 
-      await this.referrals.applyPurchaseCommissions(tx, created, user);
+      await this.referrals.applyPurchaseCommissions(tx, created, user, quote.referrer_id);
 
       await tx.auditLog.create({
         data: { actorId: userId, action: 'NFT_INTERNAL_ISSUED', entityType: 'PurchaseOrder', entityId: created.id, metadata: { quantity: quote.amount, productId: product.id } },
       });
-      return tx.purchaseOrder.findUniqueOrThrow({ where: { id: created.id }, include: { nftAssets: true } });
+      const order = await tx.purchaseOrder.findUniqueOrThrow({ where: { id: created.id }, include: { product: true, nftAssets: true } });
+      return this.purchaseOrderView(order, updatedUser.balanceVnd.toString());
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   }
 
@@ -363,8 +464,232 @@ export class Phase1Service {
     return this.prisma.nftAsset.findMany({ where: { ownerId: userId, ...(productId ? { productId } : {}) }, include: { product: true }, orderBy: { issuedAt: 'desc' } });
   }
 
+  async myNftsPaged(userId: string, query: { project_id?: string; q?: string; page?: number; limit?: number }) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+    const search = query.q?.trim();
+    const where: Prisma.NftAssetWhereInput = {
+      ownerId: userId,
+      ...(query.project_id ? { productId: query.project_id } : {}),
+      ...(search ? {
+        OR: [
+          { assetCode: { contains: search, mode: 'insensitive' } },
+          { product: { name: { contains: search, mode: 'insensitive' } } },
+          { product: { symbol: { contains: search, mode: 'insensitive' } } },
+        ],
+      } : {}),
+    };
+    const [total, rows] = await Promise.all([
+      this.prisma.nftAsset.count({ where }),
+      this.prisma.nftAsset.findMany({
+        where,
+        include: { product: true, order: true },
+        orderBy: { issuedAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+    return { data: rows.map((row) => this.nftAssetView(row)), extra: pageExtra(page, limit, total) };
+  }
+
+  async myNftDetail(userId: string, id: string) {
+    const row = await this.prisma.nftAsset.findFirst({
+      where: { id, ownerId: userId },
+      include: { product: true, order: true },
+    });
+    if (!row) throw new NotFoundException('Không tìm thấy NFT trong tài khoản');
+    return this.nftAssetView(row);
+  }
+
+  async purchaseOrderDetail(userId: string, id: string) {
+    const order = await this.prisma.purchaseOrder.findFirst({
+      where: { id, userId },
+      include: { product: true, nftAssets: { orderBy: { issuedAt: 'asc' } } },
+    });
+    if (!order) throw new NotFoundException('Không tìm thấy đơn mua NFT');
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { balanceVnd: true } });
+    return this.purchaseOrderView(order, user.balanceVnd.toString());
+  }
+
   transactions(userId?: string) {
     return this.prisma.purchaseOrder.findMany({ where: userId ? { userId } : {}, include: { user: true, product: true, nftAssets: true }, orderBy: { createdAt: 'desc' } });
+  }
+
+  private async buildPurchaseQuote(userId: string, productId: string, quantity: number, referralCode?: string) {
+    const [product, user, settings, referral] = await Promise.all([
+      this.prisma.nftProduct.findUnique({ where: { id: productId } }),
+      this.prisma.user.findUniqueOrThrow({ where: { id: userId } }),
+      this.packageSettings(),
+      this.resolvePurchaseReferral(userId, referralCode),
+    ]);
+    if (!product?.isActive) throw new NotFoundException('NFT không tồn tại');
+    requireAvailableSupply(product.totalSupply, product.soldCount, quantity);
+    const unitPriceVnd = settings.basePriceUsd.mul(settings.usdVndRate).toDecimalPlaces(0);
+    const pricing = priceAgencyPackages(user.totalPackagesPurchased, quantity, unitPriceVnd.toNumber());
+    const gross = new Prisma.Decimal(pricing.grossAmountVnd);
+    const net = new Prisma.Decimal(pricing.netAmountVnd);
+    const discount = gross.minus(net);
+    const usdRate = settings.usdVndRate;
+    const shortage = Prisma.Decimal.max(net.minus(user.balanceVnd), new Prisma.Decimal(0));
+    return {
+      amount: quantity,
+      quantity,
+      nft_id: product.id,
+      price_nft: unitPriceVnd.toString(),
+      total_vnd: net.toString(),
+      gross_total_vnd: gross.toString(),
+      discount_vnd: discount.toString(),
+      effective_discount_rate: pricing.effectiveDiscountRate,
+      discount_percent: pricing.effectiveDiscountRate * 100,
+      agency_title: pricing.attainedTier.code,
+      agency_title_label: pricing.attainedTier.label,
+      current_title: user.agencyTitle,
+      unit_price_usd: settings.basePriceUsd.toString(),
+      usd_vnd_rate: usdRate.toString(),
+      gross_amount_usd: gross.div(usdRate).toFixed(2),
+      discount_amount_usd: discount.div(usdRate).toFixed(2),
+      net_amount_usd: net.div(usdRate).toFixed(2),
+      net_amount_vnd: net.toString(),
+      starting_package_number: pricing.startingPackageNumber,
+      ending_package_number: pricing.endingPackageNumber,
+      total_packages_before: user.totalPackagesPurchased,
+      total_packages_after: pricing.endingPackageNumber,
+      pricing_breakdown: pricing.breakdown,
+      balance_vnd: user.balanceVnd.toString(),
+      balance_after_vnd: user.balanceVnd.minus(net).toString(),
+      shortage_vnd: shortage.toString(),
+      can_purchase: Boolean(user.kycVerifiedAt) && shortage.equals(0),
+      kyc_verified: Boolean(user.kycVerifiedAt),
+      referral_code: referral?.code ?? null,
+      referral_code_valid: referralCode ? Boolean(referral) : null,
+      referrer_name: referral?.name ?? null,
+      referrer_id: referral?.userId ?? null,
+      agency_id: null,
+    };
+  }
+
+  private async resolvePurchaseReferral(userId: string, value?: string) {
+    const code = value?.trim();
+    if (!code) return null;
+    if (!isReferralCodeShape(code)) throw new BadRequestException('Mã giới thiệu không hợp lệ');
+    const [account, referrer] = await Promise.all([
+      this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { referredById: true } }),
+      this.prisma.user.findFirst({
+        where: { referralCode: { equals: code, mode: 'insensitive' } },
+        select: { id: true, fullName: true, referralCode: true },
+      }),
+    ]);
+    if (referrer) {
+      if (referrer.id === userId) throw new BadRequestException('Không thể sử dụng mã giới thiệu của chính mình');
+      if (account.referredById && account.referredById !== referrer.id) throw new BadRequestException('Tài khoản đã liên kết với người giới thiệu khác');
+      return { userId: referrer.id, name: referrer.fullName, code: referrer.referralCode };
+    }
+    const agency = await this.prisma.agency.findUnique({
+      where: { code: code.toUpperCase() },
+      include: { user: { select: { id: true, fullName: true } }, store: { select: { isActive: true } } },
+    });
+    if (!agency || agency.status !== 'APPROVED' || !agency.store?.isActive) throw new BadRequestException('Mã giới thiệu không hợp lệ hoặc đã bị khóa');
+    if (agency.userId === userId) throw new BadRequestException('Không thể sử dụng mã giới thiệu của chính mình');
+    if (account.referredById && account.referredById !== agency.userId) throw new BadRequestException('Tài khoản đã liên kết với người giới thiệu khác');
+    return { userId: agency.user.id, name: agency.user.fullName, code: agency.code };
+  }
+
+  private packageSettings() {
+    return this.prisma.agencyPackageSetting.upsert({
+      where: { id: 'default' },
+      create: { id: 'default', basePriceUsd: '25', usdVndRate: '25000' },
+      update: {},
+    });
+  }
+
+  private purchaseOrderView(order: {
+    id: string;
+    productId: string;
+    quantity: number;
+    unitPriceVnd: Prisma.Decimal;
+    totalVnd: Prisma.Decimal;
+    grossTotalVnd?: Prisma.Decimal | null;
+    discountVnd?: Prisma.Decimal | null;
+    effectiveDiscountRate?: Prisma.Decimal | null;
+    agencyTitle?: string | null;
+    unitPriceUsd?: Prisma.Decimal | null;
+    usdVndRate?: Prisma.Decimal | null;
+    pricingBreakdown?: Prisma.JsonValue | null;
+    referralCode?: string | null;
+    status: OrderStatus;
+    createdAt: Date;
+    updatedAt: Date;
+    product?: { id: string; name: string; symbol: string; imageUrl: string } | null;
+    nftAssets: Array<{ id: string; assetCode: string; metadataUrl: string; issuedAt: Date }>;
+  }, balanceAfterVnd?: string) {
+    return {
+      id: order.id,
+      productId: order.productId,
+      unitPriceVnd: order.unitPriceVnd.toString(),
+      totalVnd: order.totalVnd.toString(),
+      nftAssets: order.nftAssets,
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+      transaction_code: `TX#${order.id.slice(-8).toUpperCase()}`,
+      status: order.status.toLowerCase(),
+      product_id: order.productId,
+      product: order.product ? { id: order.product.id, name: order.product.name, symbol: order.product.symbol, image_url: order.product.imageUrl } : null,
+      quantity: order.quantity,
+      unit_price_vnd: order.unitPriceVnd.toString(),
+      unit_price_usd: order.unitPriceUsd?.toString() ?? null,
+      usd_vnd_rate: order.usdVndRate?.toString() ?? null,
+      gross_total_vnd: order.grossTotalVnd?.toString() ?? order.totalVnd.toString(),
+      discount_vnd: order.discountVnd?.toString() ?? '0',
+      effective_discount_percent: order.effectiveDiscountRate?.mul(100).toString() ?? '0',
+      total_vnd: order.totalVnd.toString(),
+      agency_title: order.agencyTitle ?? null,
+      referral_code: order.referralCode ?? null,
+      pricing_breakdown: order.pricingBreakdown ?? [],
+      balance_after_vnd: balanceAfterVnd ?? null,
+      nft_assets: order.nftAssets.map((asset) => ({
+        id: asset.id,
+        asset_code: asset.assetCode,
+        metadata_url: asset.metadataUrl,
+        issued_at: asset.issuedAt.toISOString(),
+      })),
+      created_at: order.createdAt.toISOString(),
+      updated_at: order.updatedAt.toISOString(),
+    };
+  }
+
+  private nftAssetView(row: {
+    id: string;
+    assetCode: string;
+    metadataUrl: string;
+    issuedAt: Date;
+    product: { id: string; name: string; symbol: string; description: string; imageUrl: string; totalSupply: number; soldCount: number };
+    order: { id: string; unitPriceVnd: Prisma.Decimal; totalVnd: Prisma.Decimal; agencyTitle: string | null; createdAt: Date };
+  }) {
+    return {
+      id: row.id,
+      asset_code: row.assetCode,
+      metadata_url: row.metadataUrl,
+      issued_at: row.issuedAt.toISOString(),
+      ownership_system: 'MINDO_INTERNAL',
+      blockchain_transaction: null,
+      certificate: { type: 'internal', owner_verified: true },
+      product: {
+        id: row.product.id,
+        name: row.product.name,
+        symbol: row.product.symbol,
+        description: row.product.description,
+        image_url: row.product.imageUrl,
+        total_supply: row.product.totalSupply,
+        sold_count: row.product.soldCount,
+      },
+      purchase: {
+        order_id: row.order.id,
+        unit_price_vnd: row.order.unitPriceVnd.toString(),
+        order_total_vnd: row.order.totalVnd.toString(),
+        agency_title: row.order.agencyTitle,
+        purchased_at: row.order.createdAt.toISOString(),
+      },
+    };
   }
 
   articles(publishedOnly = true) {
@@ -390,8 +715,15 @@ export class Phase1Service {
     return users.map(userView);
   }
 
-  private depositView<T extends { vietQrData: Prisma.JsonValue | null }>(deposit: T) {
-    return { ...deposit, vietqr: deposit.vietQrData };
+  private depositView<T extends { vietQrData: Prisma.JsonValue | null; expiresAt?: Date | null; status?: DepositStatus }>(deposit: T) {
+    const qrExpired = deposit.status === DepositStatus.PENDING && Boolean(deposit.expiresAt && deposit.expiresAt <= new Date());
+    return {
+      ...deposit,
+      vietqr: deposit.vietQrData,
+      expires_at: deposit.expiresAt?.toISOString() ?? null,
+      qr_expired: qrExpired,
+      display_status: qrExpired ? 'expired' : deposit.status?.toLowerCase(),
+    };
   }
 
   private async withKycFiles<T extends { idFrontFileUrl: string; idBackFileUrl: string; selfieFileUrl?: string | null }>(row: T) {

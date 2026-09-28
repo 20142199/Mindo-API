@@ -39,6 +39,7 @@ The NFT purchase and VietQR deposit history contract is documented in [`docs/his
 The Agora audio/video calling flow and app integration contract is documented in [`docs/call-api.md`](docs/call-api.md).
 The email/phone friend request and user-ID relationship contract is documented in [`docs/friend-api.md`](docs/friend-api.md).
 The registration referral, branch dashboard, reward, and Admin configuration contract is documented in [`docs/referral-api.md`](docs/referral-api.md).
+The desktop web flow for QR login, VietQR top-up, discounted Peer purchase, internal ownership, and commission reporting is documented in [`docs/web-peer-api.md`](docs/web-peer-api.md).
 
 ## OTP and KYC
 

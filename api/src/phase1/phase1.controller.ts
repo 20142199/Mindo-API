@@ -7,7 +7,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthenticatedRequest, JwtAuthGuard, Roles, authUser } from '../auth/auth.guard';
 import { ok } from '../common/api-response';
 import { FileStorageService } from './file-storage.service';
-import { CalculatePriceDto, CreateArticleDto, CreateDepositDto, CreateKycDto, CreateNftProductDto, DepositReviewDto, InvestDto, ReviewDto, SnapshotPriceDto, VietQrCallbackDto } from './phase1.dto';
+import { CalculatePriceDto, CreateArticleDto, CreateDepositDto, CreateKycDto, CreateNftProductDto, DepositReviewDto, InvestDto, MyNftQueryDto, ReviewDto, SnapshotPriceDto, VietQrCallbackDto } from './phase1.dto';
 import { Phase1Service } from './phase1.service';
 import { VietQrService } from './vietqr.service';
 
@@ -76,24 +76,46 @@ export class Phase1Controller {
   }
 
   @Get('nfts') products() { return this.service.listProducts().then((data) => ok(data)); }
+  @Get('nfts/:id') product(@Param('id') id: string) { return this.service.productDetail(id).then((data) => ok(data)); }
   @Get('news') news() { return this.service.articles().then((data) => ok(data)); }
 
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('investor/invest/config')
+  purchaseConfig(@Req() req: AuthedRequest, @Query('project_id') productId?: string) {
+    return this.service.purchaseConfig(authUser(req).id, productId).then((data) => ok(data));
+  }
+
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Post('investor/invest/calculate-price')
-  calculate(@Body() dto: CalculatePriceDto) { return this.service.calculatePrice(dto.project_id, dto.amount).then((data) => ok(data)); }
+  calculate(@Req() req: AuthedRequest, @Body() dto: CalculatePriceDto) {
+    return this.service.calculatePrice(authUser(req).id, dto.project_id, dto.amount, dto.referral_code).then((data) => ok(data));
+  }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Post('investor/invest/snapshot-price')
   snapshot(@Req() req: AuthedRequest, @Body() dto: SnapshotPriceDto) {
-    return this.service.createSnapshot(authUser(req).id, dto.nft_id, dto.amount, dto.payment_type).then((data) => ok(data));
+    return this.service.createSnapshot(authUser(req).id, dto.nft_id, dto.amount, dto.payment_type, dto.referral_code).then((data) => ok(data));
   }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Post('investor/invest')
   invest(@Req() req: AuthedRequest, @Body() dto: InvestDto) {
-    return this.service.purchase(authUser(req).id, dto.price_snapshot, dto.agency_code).then((data) => ok(data, 'Đã mua và cấp NFT nội bộ'));
+    return this.service.purchase(authUser(req).id, dto.price_snapshot, dto.agency_code, dto.referral_code).then((data) => ok(data, 'Đã mua và cấp NFT nội bộ'));
+  }
+
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('investor/invest/orders/:id')
+  purchaseOrder(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.service.purchaseOrderDetail(authUser(req).id, id).then((data) => ok(data));
   }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('investor/me/nfts')
-  myNfts(@Req() req: AuthedRequest, @Query('project_id') productId?: string) {
-    return this.service.myNfts(authUser(req).id, productId).then((data) => ok(data));
+  async myNfts(@Req() req: AuthedRequest, @Query() query: MyNftQueryDto) {
+    if (query.q !== undefined || query.page !== undefined || query.limit !== undefined) {
+      const result = await this.service.myNftsPaged(authUser(req).id, query);
+      return ok(result.data, 'Thành công', result.extra);
+    }
+    return this.service.myNfts(authUser(req).id, query.project_id).then((data) => ok(data));
+  }
+
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('investor/me/nfts/:id')
+  myNft(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.service.myNftDetail(authUser(req).id, id).then((data) => ok(data));
   }
 
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('investor/transactions/nfts')

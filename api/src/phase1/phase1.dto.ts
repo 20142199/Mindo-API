@@ -1,5 +1,6 @@
 import { ArticleStatus, ReviewStatus } from '@prisma/client';
-import { IsEmail, IsEnum, IsInt, IsNumber, IsNumberString, IsOptional, IsString, IsUrl, Matches, Max, Min, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsEmail, IsEnum, IsIn, IsInt, IsNumber, IsNumberString, IsOptional, IsString, IsUrl, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class CreateKycDto {
   @IsString() @MinLength(2) full_name!: string;
@@ -63,17 +64,27 @@ export class CreateNftProductDto {
 export class CalculatePriceDto {
   @IsInt() @Min(1) @Max(500) amount!: number;
   @IsString() project_id!: string;
+  @IsOptional() @IsString() @MaxLength(64) referral_code?: string;
 }
 
 export class SnapshotPriceDto {
   @IsInt() @Min(1) @Max(500) amount!: number;
   @IsString() nft_id!: string;
-  @IsString() payment_type!: string;
+  @IsString() @IsIn(['BALANCE', 'balance']) payment_type!: string;
+  @IsOptional() @IsString() @MaxLength(64) referral_code?: string;
 }
 
 export class InvestDto {
   @IsString() price_snapshot!: string;
-  @IsOptional() @IsString() agency_code?: string;
+  @IsOptional() @IsString() @MaxLength(64) agency_code?: string;
+  @IsOptional() @IsString() @MaxLength(64) referral_code?: string;
+}
+
+export class MyNftQueryDto {
+  @IsOptional() @IsString() project_id?: string;
+  @IsOptional() @IsString() @MaxLength(120) q?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit?: number;
 }
 
 export class CreateArticleDto {
