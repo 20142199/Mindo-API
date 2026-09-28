@@ -48,6 +48,13 @@ export class AiProviderService {
         ? 'Soạn tài liệu Markdown hoàn chỉnh, có tiêu đề và các mục rõ ràng.'
         : '';
     const systemPrompt = `${expert.systemPrompt}\n${taskInstruction}`.trim();
+    /*
+      A translation is a one-shot request. With the session history attached
+      the model translates the earlier turns too — on staging a Vietnamese →
+      Korean request came back with the previous inputs translated above the
+      requested text.
+    */
+    if (kind === AiMessageKind.TRANSLATION) options = { ...options, history: [] };
     const primary = this.vendor(process.env.LLM_PRIMARY_VENDOR, 'gemini');
     const fallback = this.vendor(process.env.LLM_FALLBACK_VENDOR, 'deepseek');
     const providers = [...new Set<AiVendor>([primary, fallback])];
