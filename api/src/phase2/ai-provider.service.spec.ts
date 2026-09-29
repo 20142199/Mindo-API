@@ -348,6 +348,158 @@ describe('AiProviderService', () => {
     expect(second.metadata?.seed).toBe(Number(seedOf(1)));
   });
 
+  describe('OpenAI', () => {
+    const chatOk = (content: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ model: 'gpt-4.1-mini-2025-04-14', choices: [{ message: { content } }], usage: { prompt_tokens: 9, completion_tokens: 4, total_tokens: 13 } }),
+    });
+
+    it('LLM_PRIMARY_VENDOR=openai gọi Chat Completions với khoá Bearer và model mặc định', async () => {
+      process.env.AI_MOCK = 'false';
+      process.env.OPENAI_API_KEY = 'openai-key';
+      process.env.LLM_PRIMARY_VENDOR = 'OpenAI';
+      process.env.LLM_FALLBACK_VENDOR = 'gemini';
+      delete process.env.OPENAI_MODEL;
+      const fetchMock = vi.fn().mockResolvedValue(chatOk('Xin chào bạn.'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const result = await new AiProviderService().generate(expert, AiMessageKind.CHAT, 'Xin chào', {
+        history: [{ role: 'user', content: 'Trước đó' }, { role: 'assistant', content: 'Đã rõ' }],
+      });
+
+      expect(result.content).toBe('Xin chào bạn.');
+      expect(result.metadata).toMatchObject({ vendor: 'openai', primary_vendor: 'openai', fallback_used: false, total_tokens: 13 });
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://api.openai.com/v1/chat/completions');
+      expect(init.headers.authorization).toBe('Bearer openai-key');
+      const body = JSON.parse(init.body as string);
+      expect(body.model).toBe('gpt-4.1-mini');
+      expect(body.messages.map((m: { role: string }) => m.role)).toEqual(['system', 'user', 'assistant', 'user']);
+      /* OpenAI đã bỏ `max_tokens` ở các model mới — phải dùng max_completion_tokens */
+      expect(body.max_completion_tokens).toBeGreaterThan(0);
+      expect(body.max_tokens).toBeUndefined();
+    });
+
+    it('model họ gpt-5 không nhận temperature tuỳ chỉnh — không gửi', async () => {
+      process.env.AI_MOCK = 'false';
+      process.env.OPENAI_API_KEY = 'openai-key';
+      process.env.LLM_PRIMARY_VENDOR = 'openai';
+      process.env.OPENAI_MODEL = 'gpt-5-mini';
+      const fetchMock = vi.fn().mockResolvedValue(chatOk('OK'));
+      vi.stubGlobal('fetch', fetchMock);
+
+      await new AiProviderService().generate(expert, AiMessageKind.CHAT, 'Xin chào');
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+      expect(body.model).toBe('gpt-5-mini');
+      expect(body.temperature).toBeUndefined();
+    });
+
+    it('OpenAI hỏng thì lùi về Gemini', async () => {
+      process.env.AI_MOCK = 'false';
+      process.env.OPENAI_API_KEY = 'openai-key';
+      process.env.GEMINI_API_KEY = 'gemini-key';
+      process.env.LLM_PRIMARY_VENDOR = 'openai';
+      process.env.LLM_FALLBACK_VENDOR = 'gemini';
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: false, status: 429 })
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: 'Gemini trả lời.' }] } }] }) });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const result = await new AiProviderService().generate(expert, AiMessageKind.CHAT, 'Xin chào');
+
+      expect(result.content).toBe('Gemini trả lời.');
+      expect(result.metadata).toMatchObject({ vendor: 'gemini', primary_vendor: 'openai', fallback_used: true });
+    });
+
+    it('gửi ảnh đính kèm dạng image_url và PDF dạng file cho OpenAI', async () => {
+      process.env.AI_MOCK = 'false';
+      process.env.OPENAI_API_KEY = 'openai-key';
+      process.env.LLM_PRIMARY_VENDOR = 'openai';
+      const fetchMock = vi.fn().mockResolvedValue(chatOk('Đã đọc.'));
+      vi.stubGlobal('fetch', fetchMock);
+      const service = new AiProviderService();
+
+      await service.generate(expert, AiMessageKind.CHAT, 'Ảnh này là gì?', {
+        attachment: { name: 'a.png', mimeType: 'image/png', content: Buffer.from('png-bytes') },
+      });
+      await service.generate(expert, AiMessageKind.CHAT, 'Tóm tắt giúp', {
+        attachment: { name: 'bao-cao.pdf', mimeType: 'application/pdf', content: Buffer.from('pdf-bytes') },
+      });
+
+      const imageTurn = JSON.parse(fetchMock.mock.calls[0][1].body as string).messages.at(-1);
+      expect(imageTurn.content).toEqual([
+        { type: 'image_url', image_url: { url: `data:image/png;base64,${Buffer.from('png-bytes').toString('base64')}` } },
+        { type: 'text', text: 'Ảnh này là gì?' },
+      ]);
+      const pdfTurn = JSON.parse(fetchMock.mock.calls[1][1].body as string).messages.at(-1);
+      expect(pdfTurn.content[0]).toEqual({
+        type: 'file',
+        file: { filename: 'bao-cao.pdf', file_data: `data:application/pdf;base64,${Buffer.from('pdf-bytes').toString('base64')}` },
+      });
+    });
+
+    it('đặt tiêu đề ảnh bằng OpenAI khi nó là nhà chính', async () => {
+      process.env.AI_MOCK = 'false';
+      process.env.OPENAI_API_KEY = 'openai-key';
+      process.env.LLM_PRIMARY_VENDOR = 'openai';
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(chatOk('"Đèn lồng Hội An".')));
+
+      await expect(new AiProviderService().summarizeTitle('Phố cổ Hội An về đêm')).resolves.toBe('Đèn lồng Hội An');
+    });
+
+    it.each([
+      ['1:1', '1024x1024', 1024, 1024],
+      ['4:3', '1536x1024', 1536, 1024],
+      ['9:16', '1024x1536', 1024, 1536],
+    ] as const)('IMAGE_VENDOR=openai: tỷ lệ %s xin kích thước %s', async (ratio, size, width, height) => {
+      process.env.AI_MOCK = 'false';
+      process.env.OPENAI_API_KEY = 'openai-key';
+      process.env.IMAGE_VENDOR = 'openai';
+      delete process.env.OPENAI_IMAGE_MODEL;
+      delete process.env.OPENAI_IMAGE_QUALITY;
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [{ b64_json: Buffer.from('jpeg-bytes').toString('base64') }], usage: { input_tokens: 20, output_tokens: 400, total_tokens: 420 } }),
+      });
+      vi.stubGlobal('fetch', fetchMock);
+
+      const result = await new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'Robot Mindo', {
+        aspectRatio: ratio,
+        imageStyle: 'THREE_D',
+      });
+
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(url).toBe('https://api.openai.com/v1/images/generations');
+      expect(init.headers.authorization).toBe('Bearer openai-key');
+      const body = JSON.parse(init.body as string);
+      expect(body).toMatchObject({ model: 'gpt-image-1', size, quality: 'medium', n: 1, output_format: 'jpeg' });
+      /* phong cách vẫn được ghép vào mô tả như mọi nhà khác */
+      expect(body.prompt).toContain('Robot Mindo');
+      expect(body.prompt).not.toBe('Robot Mindo');
+      expect(result.attachmentData?.mimeType).toBe('image/jpeg');
+      expect(result.attachmentData?.filename).toMatch(/\.jpg$/);
+      expect(result.attachmentData?.content.toString()).toBe('jpeg-bytes');
+      expect(result.metadata).toMatchObject({ vendor: 'openai', model: 'gpt-image-1', width, height, total_tokens: 420 });
+    });
+
+    it('IMAGE_VENDOR=openai mà thiếu khoá hoặc OpenAI hỏng thì báo lỗi có mã riêng', async () => {
+      process.env.AI_MOCK = 'false';
+      process.env.IMAGE_VENDOR = 'openai';
+      delete process.env.OPENAI_API_KEY;
+      vi.stubGlobal('fetch', vi.fn());
+      await expect(new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'mèo'))
+        .rejects.toMatchObject({ response: { code: 'OPENAI_NOT_CONFIGURED' } });
+
+      process.env.OPENAI_API_KEY = 'openai-key';
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 400 }));
+      await expect(new AiProviderService().generate(expert, AiMessageKind.IMAGE, 'mèo'))
+        .rejects.toMatchObject({ response: { code: 'OPENAI_IMAGE_FAILED', provider_status: 400 } });
+    });
+  });
+
   describe('summarizeTitle', () => {
     it('lấy tiêu đề từ model chữ và dọn ngoặc, dấu chấm', async () => {
       process.env.AI_MOCK = 'false';
