@@ -16,9 +16,11 @@ export type AiGenerateOptions = {
   imageStyle?: AiImageStyle;
   aspectRatio?: AiAspectRatio;
 };
-type AiVendor = 'gemini' | 'deepseek' | 'pollinations';
+type AiVendor = 'gemini' | 'deepseek' | 'openai' | 'pollinations';
+/* Nhà cung cấp chữ — nhận ở LLM_PRIMARY_VENDOR / LLM_FALLBACK_VENDOR */
+type TextVendor = 'gemini' | 'deepseek' | 'openai';
 /* Nhà cung cấp ảnh — tách khỏi `AiVendor` vì không phải nhà nào cũng làm chữ */
-type ImageVendor = 'gemini' | 'pollinations';
+type ImageVendor = 'gemini' | 'openai' | 'pollinations';
 type TokenUsage = { inputTokens: number; outputTokens: number; totalTokens: number };
 type AiResult = {
   content: string;
@@ -30,6 +32,13 @@ type ProviderTextResult = { content: string; vendor: AiVendor; model: string; us
 class VendorError extends Error {
   constructor(public readonly vendor: AiVendor, public readonly status: number | null, message: string) { super(message); }
 }
+
+/* Ba kích thước gpt-image-1 nhận — xem generateOpenAiImage */
+const OPENAI_IMAGE_SIZES: Record<AiAspectRatio, string> = {
+  '1:1': '1024x1024',
+  '4:3': '1536x1024',
+  '9:16': '1024x1536',
+};
 
 @Injectable()
 export class AiProviderService {
@@ -57,14 +66,12 @@ export class AiProviderService {
     if (kind === AiMessageKind.TRANSLATION) options = { ...options, history: [] };
     const primary = this.vendor(process.env.LLM_PRIMARY_VENDOR, 'gemini');
     const fallback = this.vendor(process.env.LLM_FALLBACK_VENDOR, 'deepseek');
-    const providers = [...new Set<AiVendor>([primary, fallback])];
+    const providers = [...new Set<TextVendor>([primary, fallback])];
     let lastError: VendorError | undefined;
 
     for (const vendor of providers) {
       try {
-        const generated = vendor === 'gemini'
-          ? await this.completeGemini(systemPrompt, input, options)
-          : await this.completeDeepSeek(systemPrompt, input, options);
+        const generated = await this.completeText(vendor, systemPrompt, input, options);
         const specific = kind === AiMessageKind.DOCUMENT
           ? { filename: 'tai-lieu-mindo.docx', mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', credits: 1 }
           : kind === AiMessageKind.TRANSLATION
@@ -111,11 +118,9 @@ export class AiProviderService {
     const systemPrompt = 'Đặt tiêu đề ngắn từ 2 đến 5 chữ cho bức ảnh được mô tả. Giữ ngôn ngữ của mô tả. Chỉ trả về tiêu đề, không ngoặc kép, không dấu chấm.';
     const primary = this.vendor(process.env.LLM_PRIMARY_VENDOR, 'gemini');
     const fallback = this.vendor(process.env.LLM_FALLBACK_VENDOR, 'deepseek');
-    for (const vendor of [...new Set<AiVendor>([primary, fallback])]) {
+    for (const vendor of [...new Set<TextVendor>([primary, fallback])]) {
       try {
-        const result = vendor === 'gemini'
-          ? await this.completeGemini(systemPrompt, prompt, { signal })
-          : await this.completeDeepSeek(systemPrompt, prompt, { signal });
+        const result = await this.completeText(vendor, systemPrompt, prompt, { signal });
         return sanitizeTitle(result.content);
       } catch {
         if (signal?.aborted) return null;
@@ -173,32 +178,100 @@ export class AiProviderService {
     };
   }
 
-  private async completeDeepSeek(systemPrompt: string, input: string, options: AiGenerateOptions): Promise<ProviderTextResult> {
+  private completeText(vendor: TextVendor, systemPrompt: string, input: string, options: AiGenerateOptions): Promise<ProviderTextResult> {
+    if (vendor === 'gemini') return this.completeGemini(systemPrompt, input, options);
+    if (vendor === 'openai') return this.completeOpenAi(systemPrompt, input, options);
+    return this.completeDeepSeek(systemPrompt, input, options);
+  }
+
+  private completeDeepSeek(systemPrompt: string, input: string, options: AiGenerateOptions): Promise<ProviderTextResult> {
     const vendor: AiVendor = 'deepseek';
     if (options.attachment) throw new VendorError(vendor, null, 'DeepSeek fallback does not support Mindo file attachments');
     const apiKey = process.env.DEEPSEEK_API_KEY?.trim();
     if (!apiKey) throw new VendorError(vendor, null, 'Missing DeepSeek API key');
-    const baseUrl = (process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com').replace(/\/+$/, '');
-    const model = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
+    return this.completeChatCompletions(vendor, {
+      baseUrl: process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com',
+      apiKey,
+      model: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
+      /* DeepSeek chưa nhận `max_completion_tokens` */
+      maxTokensField: 'max_tokens',
+    }, systemPrompt, input, options);
+  }
+
+  /**
+   * OpenAI qua Chat Completions — cùng giao thức với DeepSeek nên dùng chung
+   * `completeChatCompletions`, chỉ khác ba chỗ:
+   *
+   * - nhận file đính kèm: ảnh gửi dạng `image_url`, PDF dạng `file` (DeepSeek
+   *   thì không nhận gì);
+   * - giới hạn độ dài gửi bằng `max_completion_tokens` — OpenAI đã bỏ
+   *   `max_tokens` ở các model mới và trả 400 nếu còn gửi;
+   * - họ model suy luận (gpt-5*, o1/o3/o4…) chỉ chấp nhận temperature mặc
+   *   định, gửi số khác là 400 — nên không gửi.
+   */
+  private completeOpenAi(systemPrompt: string, input: string, options: AiGenerateOptions): Promise<ProviderTextResult> {
+    const vendor: AiVendor = 'openai';
+    const apiKey = process.env.OPENAI_API_KEY?.trim();
+    if (!apiKey) throw new VendorError(vendor, null, 'Missing OpenAI API key');
+    const model = process.env.OPENAI_MODEL?.trim() || 'gpt-4.1-mini';
+    const attachment = options.attachment;
+    let userContent: string | Array<Record<string, unknown>> = input;
+    if (attachment) {
+      const dataUrl = `data:${attachment.mimeType};base64,${attachment.content.toString('base64')}`;
+      if (attachment.mimeType.startsWith('image/')) {
+        userContent = [{ type: 'image_url', image_url: { url: dataUrl } }, { type: 'text', text: input }];
+      } else if (attachment.mimeType === 'application/pdf') {
+        userContent = [{ type: 'file', file: { filename: attachment.name, file_data: dataUrl } }, { type: 'text', text: input }];
+      } else {
+        throw new VendorError(vendor, null, `OpenAI does not accept ${attachment.mimeType} attachments`);
+      }
+    }
+    return this.completeChatCompletions(vendor, {
+      baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
+      apiKey,
+      model,
+      maxTokensField: 'max_completion_tokens',
+      omitTemperature: /^(gpt-5|o\d)/.test(model),
+      userContent,
+    }, systemPrompt, input, options);
+  }
+
+  private async completeChatCompletions(
+    vendor: AiVendor,
+    config: {
+      baseUrl: string;
+      apiKey: string;
+      model: string;
+      maxTokensField: 'max_tokens' | 'max_completion_tokens';
+      omitTemperature?: boolean;
+      userContent?: string | Array<Record<string, unknown>>;
+    },
+    systemPrompt: string,
+    input: string,
+    options: AiGenerateOptions,
+  ): Promise<ProviderTextResult> {
+    const baseUrl = config.baseUrl.replace(/\/+$/, '');
+    const model = config.model;
     const history = (options.history ?? []).slice(-this.contextLimit());
     const response = await this.request(vendor, `${baseUrl}/chat/completions`, {
       'content-type': 'application/json',
-      authorization: `Bearer ${apiKey}`,
+      authorization: `Bearer ${config.apiKey}`,
     }, {
       model,
-      messages: [{ role: 'system', content: systemPrompt }, ...history, { role: 'user', content: input }],
-      temperature: Number(process.env.AI_TEMPERATURE ?? 0.4),
-      max_tokens: Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 2_048),
+      messages: [{ role: 'system', content: systemPrompt }, ...history, { role: 'user', content: config.userContent ?? input }],
+      ...(config.omitTemperature ? {} : { temperature: Number(process.env.AI_TEMPERATURE ?? 0.4) }),
+      [config.maxTokensField]: Number(process.env.AI_MAX_OUTPUT_TOKENS ?? 2_048),
       ...(options.onDelta ? { stream: true, stream_options: { include_usage: true } } : {}),
     }, options.signal);
-    if (options.onDelta) return this.readDeepSeekStream(response, vendor, model, options.onDelta);
+    const label = vendor === 'openai' ? 'OpenAI' : 'DeepSeek';
+    if (options.onDelta) return this.readChatCompletionsStream(response, vendor, model, label, options.onDelta);
     const data = await response.json() as {
       model?: string;
       choices?: Array<{ message?: { content?: string } }>;
       usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     };
     const content = data.choices?.[0]?.message?.content?.trim();
-    if (!content) throw new VendorError(vendor, response.status, 'DeepSeek empty response');
+    if (!content) throw new VendorError(vendor, response.status, `${label} empty response`);
     const inputTokens = data.usage?.prompt_tokens ?? 0;
     const outputTokens = data.usage?.completion_tokens ?? 0;
     return {
@@ -222,16 +295,77 @@ export class AiProviderService {
    * nhanh nhất để một môi trường im lặng dùng nhà khác mà không ai hay.
    */
   private imageVendor(): ImageVendor {
-    return process.env.IMAGE_VENDOR?.trim().toLowerCase() === 'pollinations' ? 'pollinations' : 'gemini';
+    const value = process.env.IMAGE_VENDOR?.trim().toLowerCase();
+    return value === 'pollinations' || value === 'openai' ? value : 'gemini';
   }
 
   private generateImage(input: string, startedAt: number, options: AiGenerateOptions): Promise<AiResult> {
     const ratio = aspectRatioOf(options.aspectRatio);
     /* Phong cách ghép vào mô tả ở ĐÂY, một chỗ cho mọi nhà cung cấp */
     const prompt = styledPrompt(input, imageStyleOf(options.imageStyle));
-    return this.imageVendor() === 'pollinations'
+    const vendor = this.imageVendor();
+    if (vendor === 'openai') return this.generateOpenAiImage(prompt, ratio, startedAt, options.signal);
+    return vendor === 'pollinations'
       ? this.generatePollinationsImage(prompt, ratio, startedAt, options.signal)
       : this.generateGeminiImage(prompt, ratio, startedAt, options.signal);
+  }
+
+  /**
+   * Tạo ảnh qua OpenAI Images API (`gpt-image-1`).
+   *
+   * Model này chỉ nhận ba kích thước, nên tỷ lệ của app được ánh xạ về cái
+   * gần nhất: 4:3 → 1536×1024 (3:2), 9:16 → 1024×1536 (2:3). App vẽ ảnh với
+   * `resizeMode="cover"` trong khung đúng tỷ lệ đã chọn, nên chỉ cắt đi một
+   * dải mép chứ không méo. Kích thước thật được ghi vào metadata.
+   *
+   * Xin JPEG thay vì PNG mặc định: cùng một tấm 1024², PNG ~1,1 MB còn JPEG
+   * chỉ bằng một phần — đỡ cho cả ổ đĩa server lẫn lúc app tải về.
+   */
+  private async generateOpenAiImage(input: string, ratio: AiAspectRatio, startedAt: number, signal?: AbortSignal): Promise<AiResult> {
+    const vendor: AiVendor = 'openai';
+    const apiKey = process.env.OPENAI_API_KEY?.trim();
+    if (!apiKey) throw new ServiceUnavailableException({ message: 'Chưa cấu hình OpenAI để tạo ảnh', code: 'OPENAI_NOT_CONFIGURED' });
+    const baseUrl = (process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/+$/, '');
+    const model = process.env.OPENAI_IMAGE_MODEL?.trim() || 'gpt-image-1';
+    const quality = process.env.OPENAI_IMAGE_QUALITY?.trim() || 'medium';
+    const size = OPENAI_IMAGE_SIZES[ratio];
+    let response: Response;
+    try {
+      response = await this.request(vendor, `${baseUrl}/images/generations`, {
+        'content-type': 'application/json',
+        authorization: `Bearer ${apiKey}`,
+      }, { model, prompt: input, size, quality, n: 1, output_format: 'jpeg' }, signal);
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      const status = error instanceof VendorError ? error.status : null;
+      throw new ServiceUnavailableException({ message: 'OpenAI chưa thể tạo ảnh', code: 'OPENAI_IMAGE_FAILED', provider_status: status });
+    }
+    const data = await response.json() as {
+      data?: Array<{ b64_json?: string }>;
+      usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
+    };
+    const bytes = data.data?.[0]?.b64_json;
+    if (!bytes) throw new ServiceUnavailableException({ message: 'OpenAI không trả về ảnh', code: 'OPENAI_IMAGE_EMPTY' });
+    const [width, height] = size.split('x').map(Number);
+    const inputTokens = data.usage?.input_tokens ?? 0;
+    const outputTokens = data.usage?.output_tokens ?? 0;
+    return {
+      content: 'Ảnh đã được tạo theo yêu cầu.',
+      attachmentData: { content: Buffer.from(bytes, 'base64'), mimeType: 'image/jpeg', filename: `mindo-ai-${Date.now()}.jpg` },
+      metadata: {
+        vendor,
+        model,
+        credits: 1,
+        width,
+        height,
+        quality,
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        total_tokens: data.usage?.total_tokens ?? inputTokens + outputTokens,
+        duration_ms: Date.now() - startedAt,
+        fallback_used: false,
+      },
+    };
   }
 
   /**
@@ -366,8 +500,9 @@ export class AiProviderService {
     return response;
   }
 
-  private vendor(value: string | undefined, fallback: AiVendor): AiVendor {
-    return value?.trim().toLowerCase() === 'deepseek' ? 'deepseek' : value?.trim().toLowerCase() === 'gemini' ? 'gemini' : fallback;
+  private vendor(value: string | undefined, fallback: TextVendor): TextVendor {
+    const clean = value?.trim().toLowerCase();
+    return clean === 'gemini' || clean === 'deepseek' || clean === 'openai' ? clean : fallback;
   }
 
   private contextLimit() {
@@ -408,10 +543,11 @@ export class AiProviderService {
     return { content, vendor, model, usage: { inputTokens, outputTokens, totalTokens: totalTokens || inputTokens + outputTokens } };
   }
 
-  private async readDeepSeekStream(
+  private async readChatCompletionsStream(
     response: Response,
     vendor: AiVendor,
     fallbackModel: string,
+    label: string,
     onDelta: (content: string) => Promise<void>,
   ): Promise<ProviderTextResult> {
     let content = '';
@@ -437,7 +573,7 @@ export class AiProviderService {
       }
     });
     content = content.trim();
-    if (!content) throw new VendorError(vendor, response.status, 'DeepSeek empty response');
+    if (!content) throw new VendorError(vendor, response.status, `${label} empty response`);
     return { content, vendor, model, usage: { inputTokens, outputTokens, totalTokens: totalTokens || inputTokens + outputTokens } };
   }
 

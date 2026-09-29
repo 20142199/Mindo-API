@@ -59,7 +59,7 @@ export class AiService {
       providers: {
         primary: process.env.LLM_PRIMARY_VENDOR ?? 'gemini',
         fallback: process.env.LLM_FALLBACK_VENDOR ?? 'deepseek',
-        image: 'gemini',
+        image: process.env.IMAGE_VENDOR?.trim().toLowerCase() || 'gemini',
       },
       languages: AI_LANGUAGES,
       upload: { max_size_bytes: 10 * 1024 * 1024, mime_types: ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'] },
