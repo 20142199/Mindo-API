@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ArticleStatus, DepositStatus, OrderStatus, Prisma, ReviewStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../common/prisma.module';
@@ -188,6 +188,20 @@ export class Phase1Service {
     return this.depositView(created);
   }
 
+  /** Người dùng tự huỷ lệnh nạp đang chờ. Tiền về sau khi huỷ vẫn được webhook cộng. */
+  async cancelDeposit(userId: string, id: string) {
+    const deposit = await this.prisma.deposit.findFirst({ where: { id, userId } });
+    if (!deposit) throw new NotFoundException('Không tìm thấy lệnh nạp');
+    if (deposit.status === DepositStatus.CANCELLED) return this.depositView(deposit);
+    if (deposit.status !== DepositStatus.PENDING) throw new ConflictException('Lệnh nạp đã được xử lý, không thể huỷ');
+    const updated = await this.prisma.deposit.update({
+      where: { id },
+      data: { status: DepositStatus.CANCELLED, reviewedAt: new Date(), reviewNote: 'Người dùng huỷ' },
+    });
+    await this.prisma.auditLog.create({ data: { actorId: userId, action: 'DEPOSIT_CANCELLED', entityType: 'Deposit', entityId: id } });
+    return this.depositView(updated);
+  }
+
   async listDeposits(userId?: string, status?: DepositStatus) {
     const rows = await this.prisma.deposit.findMany({
       where: { ...(userId ? { userId } : {}), ...(status ? { status } : {}) },
@@ -207,7 +221,7 @@ export class Phase1Service {
       if (!deposit) deposit = await tx.deposit.findUnique({ where: { transferCode: dto.content.trim() } });
       if (!deposit) {
         const recent = await tx.deposit.findMany({
-          where: { status: { in: [DepositStatus.PENDING, DepositStatus.CONFIRMED] } },
+          where: { status: { in: [DepositStatus.PENDING, DepositStatus.CONFIRMED, DepositStatus.CANCELLED] } },
           orderBy: { createdAt: 'desc' },
           take: 200,
         });
@@ -219,7 +233,9 @@ export class Phase1Service {
         if (deposit.bankTransactionId === dto.transactionid) return this.depositView(deposit);
         throw new BadRequestException('Lệnh nạp đã được thanh toán');
       }
-      if (deposit.status !== DepositStatus.PENDING) throw new BadRequestException('Lệnh nạp không còn chờ thanh toán');
+      // Lệnh đã huỷ vẫn nhận tiền: khách có thể chuyển khoản xong rồi mới bấm huỷ.
+      const cancelled = deposit.status === DepositStatus.CANCELLED;
+      if (deposit.status !== DepositStatus.PENDING && !cancelled) throw new BadRequestException('Lệnh nạp không còn chờ thanh toán');
       const paidAmount = new Prisma.Decimal(dto.amount);
       if (paidAmount.lessThan(deposit.amountVnd)) throw new BadRequestException('Số tiền chuyển khoản chưa đủ');
       const user = await tx.user.findUniqueOrThrow({ where: { id: deposit.userId } });
@@ -236,7 +252,7 @@ export class Phase1Service {
           balanceBeforeVnd: user.balanceVnd,
           balanceAfterVnd: balanceAfter,
           reviewedAt: new Date(),
-          reviewNote: 'Xác nhận tự động qua webhook VietQR',
+          reviewNote: cancelled ? 'Xác nhận tự động qua webhook VietQR (tiền về sau khi lệnh đã huỷ)' : 'Xác nhận tự động qua webhook VietQR',
         },
       });
       await tx.user.update({ where: { id: deposit.userId }, data: { balanceVnd: balanceAfter } });
