@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { parseArticleHtml, parseListingHtml } from './html-news.parser';
-import { NEWS_SOURCE_DEFINITIONS } from './news-source.definitions';
+import { NEWS_SOURCE_DEFINITIONS, sourceClassification } from './news-source.definitions';
 
 describe('HTML news parser', () => {
+  it('classifies crawled sources using the supplied tier list', () => {
+    expect(sourceClassification('forex_factory')).toEqual({ tier: 2, category: 'Dữ liệu thị trường' });
+    expect(sourceClassification('federal_reserve')).toEqual({ tier: 3, category: 'Nguồn chính thức' });
+  });
+
   it('discovers and deduplicates article links', () => {
     const html = `<main><article><a href="/newsevents/pressreleases/monetary20260924a.htm"><h2>Federal Reserve issues a policy statement</h2></a></article><a href="/newsevents/pressreleases/monetary20260924a.htm">Duplicate policy statement</a></main>`;
     const rows = parseListingHtml(html, 'https://www.federalreserve.gov/newsevents/pressreleases.htm', NEWS_SOURCE_DEFINITIONS.federal_reserve);

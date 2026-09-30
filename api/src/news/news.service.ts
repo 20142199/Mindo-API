@@ -3,6 +3,7 @@ import { ArticleStatus, NewsContentType, NewsFeedbackType, Prisma } from '@prism
 import { pageExtra } from '../common/api-response';
 import { PrismaService } from '../common/prisma.module';
 import { ListNewsDto, NewsFeedbackDto, SaveNewsArticleDto, SaveNewsExpertDto, SaveNewsTopicDto } from './news.dto';
+import { sourceClassification } from './news-source.definitions';
 
 const articleInclude = {
   topic: true,
@@ -378,7 +379,7 @@ export class NewsService {
       status: row.status, published_at: row.publishedAt, created_at: row.createdAt, updated_at: row.updatedAt,
       topic: row.topic, expert: row.expert ? this.expertView(row.expert, false) : null,
       /* Tên nguồn là dòng "CafeF · 2 giờ" ở thẻ bài. `key` và `base_url` là chuyện nội bộ của crawler. */
-      source: row.source ? { id: row.source.id, name: row.source.name, ...(admin ? { key: row.source.key, base_url: row.source.baseUrl } : {}) } : null,
+      source: row.source ? { id: row.source.id, name: row.source.name, ...sourceClassification(row.source.key), ...(admin ? { key: row.source.key, base_url: row.source.baseUrl } : {}) } : null,
       like_count: row._count.likes, is_liked: isLiked,
       ...(admin ? {
         source_title: row.sourceTitle,
