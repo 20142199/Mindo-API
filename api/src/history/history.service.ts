@@ -4,12 +4,14 @@ import { pageExtra } from '../common/api-response';
 import { PrismaService } from '../common/prisma.module';
 import { DepositHistoryQueryDto, HistoryStatus, NftHistoryQueryDto } from './history.dto';
 import {
+  DEFAULT_USD_VND_RATE,
   depositHistoryStatus,
   groupHistoryByMonth,
   historyDateRange,
   historyLabels,
   orderHistoryStatus,
   shortAssetCode,
+  vndToUsd,
 } from './history.domain';
 
 @Injectable()
@@ -25,7 +27,7 @@ export class HistoryService {
       ...(query.status ? { status: this.orderStatus(query.status) } : {}),
     };
     const skip = (query.page - 1) * query.limit;
-    const [total, rows, summary] = await Promise.all([
+    const [total, rows, summary, currentRate] = await Promise.all([
       this.prisma.purchaseOrder.count({ where }),
       this.prisma.purchaseOrder.findMany({
         where,
@@ -35,9 +37,13 @@ export class HistoryService {
         take: query.limit,
       }),
       this.nftSummary(userId),
+      this.currentUsdRate(),
     ]);
     const items = rows.map((row) => {
       const status = orderHistoryStatus(row.status);
+      const rate = row.usdVndRate ?? currentRate;
+      const gross = row.grossTotalVnd ?? row.totalVnd;
+      const discount = row.discountVnd ?? new Prisma.Decimal(0);
       const code = shortAssetCode(row.nftAssets[0]?.assetCode);
       return {
         id: row.id,
@@ -51,6 +57,9 @@ export class HistoryService {
         gross_amount_vnd: row.grossTotalVnd?.toString() ?? row.totalVnd.toString(),
         discount_vnd: row.discountVnd?.toString() ?? '0',
         amount_vnd: row.totalVnd.toString(),
+        gross_amount_usd: vndToUsd(gross, rate),
+        discount_usd: vndToUsd(discount, rate),
+        amount_usd: vndToUsd(row.totalVnd, rate),
         status,
         status_label: historyLabels[status],
         occurred_at: row.createdAt.toISOString(),
@@ -72,6 +81,7 @@ export class HistoryService {
       include: { product: true, nftAssets: { orderBy: { issuedAt: 'asc' } } },
     });
     if (!row) throw new NotFoundException('Không tìm thấy giao dịch mua NFT');
+    const rate = row.usdVndRate ?? await this.currentUsdRate();
     const status = orderHistoryStatus(row.status);
     const firstCode = shortAssetCode(row.nftAssets[0]?.assetCode);
     return {
@@ -86,6 +96,9 @@ export class HistoryService {
       gross_amount_vnd: row.grossTotalVnd?.toString() ?? row.totalVnd.toString(),
       discount_vnd: row.discountVnd?.toString() ?? '0',
       discount_percent: row.effectiveDiscountRate?.mul(100).toString() ?? '0',
+      amount_usd: vndToUsd(row.totalVnd, rate),
+      gross_amount_usd: vndToUsd(row.grossTotalVnd ?? row.totalVnd, rate),
+      discount_usd: vndToUsd(row.discountVnd ?? new Prisma.Decimal(0), rate),
       agency_title: row.agencyTitle,
       unit_price_usd: row.unitPriceUsd?.toString() ?? null,
       usd_vnd_rate: row.usdVndRate?.toString() ?? null,
@@ -232,10 +245,17 @@ export class HistoryService {
   }
 
   private async nftSummary(userId: string) {
-    const [spent, holdings] = await Promise.all([
+    const [spent, holdings, completed, currentRate] = await Promise.all([
       this.prisma.purchaseOrder.aggregate({ where: { userId, status: OrderStatus.COMPLETED }, _sum: { totalVnd: true } }),
       this.prisma.nftAsset.groupBy({ by: ['productId'], where: { ownerId: userId }, _count: { _all: true } }),
+      this.prisma.purchaseOrder.findMany({ where: { userId, status: OrderStatus.COMPLETED }, select: { totalVnd: true, usdVndRate: true } }),
+      this.currentUsdRate(),
     ]);
+    // Cộng USD từng đơn theo tỷ giá lúc mua của đơn đó.
+    const totalSpentUsd = completed.reduce(
+      (sum, order) => sum.plus(order.totalVnd.div(order.usdVndRate ?? currentRate)),
+      new Prisma.Decimal(0),
+    );
     const products = holdings.length
       ? await this.prisma.nftProduct.findMany({ where: { id: { in: holdings.map((item) => item.productId) } }, select: { id: true, unitPriceVnd: true } })
       : [];
@@ -249,6 +269,7 @@ export class HistoryService {
     return {
       scope: 'all_time',
       total_spent_vnd: totalSpent.toString(),
+      total_spent_usd: totalSpentUsd.toFixed(2),
       estimated_profit_loss_vnd: currentValue.minus(totalSpent).toString(),
       estimated_current_value_vnd: currentValue.toString(),
       valuation_basis: 'current_collection_price',
@@ -281,6 +302,11 @@ export class HistoryService {
       [HistoryStatus.CANCELLED]: OrderStatus.CANCELLED,
     };
     return values[status];
+  }
+
+  private async currentUsdRate() {
+    const settings = await this.prisma.agencyPackageSetting.findUnique({ where: { id: 'default' } });
+    return settings?.usdVndRate ?? DEFAULT_USD_VND_RATE;
   }
 
   private depositStatus(status: HistoryStatus): DepositStatus {

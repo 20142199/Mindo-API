@@ -12,6 +12,7 @@ import { ReferralService } from '../referral/referral.service';
 import { agencyTiers, priceAgencyPackages } from '../phase2/phase2.domain';
 import { isReferralCodeShape } from '../referral/referral.domain';
 import { pageExtra } from '../common/api-response';
+import { DEFAULT_USD_VND_RATE, vndToUsd } from '../history/history.domain';
 
 type SignedPurchaseQuote = {
   sub: string;
@@ -491,7 +492,7 @@ export class Phase1Service {
         ],
       } : {}),
     };
-    const [total, rows] = await Promise.all([
+    const [total, rows, currentRate] = await Promise.all([
       this.prisma.nftAsset.count({ where }),
       this.prisma.nftAsset.findMany({
         where,
@@ -500,8 +501,9 @@ export class Phase1Service {
         skip: (page - 1) * limit,
         take: limit,
       }),
+      this.currentUsdRate(),
     ]);
-    return { data: rows.map((row) => this.nftAssetView(row)), extra: pageExtra(page, limit, total) };
+    return { data: rows.map((row) => this.nftAssetView(row, currentRate)), extra: pageExtra(page, limit, total) };
   }
 
   async myNftDetail(userId: string, id: string) {
@@ -510,7 +512,7 @@ export class Phase1Service {
       include: { product: true, order: true },
     });
     if (!row) throw new NotFoundException('Không tìm thấy NFT trong tài khoản');
-    return this.nftAssetView(row);
+    return this.nftAssetView(row, await this.currentUsdRate());
   }
 
   async purchaseOrderDetail(userId: string, id: string) {
@@ -614,6 +616,11 @@ export class Phase1Service {
     return { userId: agency.user.id, name: agency.user.fullName, code: agency.code };
   }
 
+  private async currentUsdRate() {
+    const settings = await this.prisma.agencyPackageSetting.findUnique({ where: { id: 'default' } });
+    return settings?.usdVndRate ?? DEFAULT_USD_VND_RATE;
+  }
+
   private packageSettings() {
     return this.prisma.agencyPackageSetting.upsert({
       where: { id: 'default' },
@@ -683,8 +690,11 @@ export class Phase1Service {
     metadataUrl: string;
     issuedAt: Date;
     product: { id: string; name: string; symbol: string; description: string; imageUrl: string; totalSupply: number; soldCount: number };
-    order: { id: string; unitPriceVnd: Prisma.Decimal; totalVnd: Prisma.Decimal; agencyTitle: string | null; createdAt: Date };
-  }) {
+    order: { id: string; quantity: number; unitPriceVnd: Prisma.Decimal; totalVnd: Prisma.Decimal; usdVndRate: Prisma.Decimal | null; agencyTitle: string | null; createdAt: Date };
+  }, currentUsdRate: Prisma.Decimal) {
+    // Giá thực trả cho một Peer = tổng đơn sau chiết khấu / số lượng, theo tỷ giá lúc mua.
+    const rate = row.order.usdVndRate ?? currentUsdRate;
+    const effectiveUnitVnd = row.order.totalVnd.div(row.order.quantity).toDecimalPlaces(0);
     return {
       id: row.id,
       asset_code: row.assetCode,
@@ -706,6 +716,10 @@ export class Phase1Service {
         order_id: row.order.id,
         unit_price_vnd: row.order.unitPriceVnd.toString(),
         order_total_vnd: row.order.totalVnd.toString(),
+        quantity: row.order.quantity,
+        effective_unit_price_vnd: effectiveUnitVnd.toString(),
+        effective_unit_price_usd: vndToUsd(effectiveUnitVnd, rate),
+        usd_vnd_rate: rate.toString(),
         agency_title: row.order.agencyTitle,
         purchased_at: row.order.createdAt.toISOString(),
       },
