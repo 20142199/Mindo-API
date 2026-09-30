@@ -88,11 +88,21 @@ export class AdminNewsController {
     return ok(result.data, 'Thành công', result.extra);
   }
 
+  @Get('articles/:id/preview')
+  previewArticle(@Param('id') id: string) {
+    return this.news.adminArticle(id).then((data) => ok(data));
+  }
+
   @Post('articles')
   createArticle(@Body() dto: SaveNewsArticleDto) { return this.news.createArticle(dto).then((data) => ok(data, 'Đã tạo nội dung')); }
 
   @Patch('articles/:id')
   updateArticle(@Param('id') id: string, @Body() dto: SaveNewsArticleDto) { return this.news.updateArticle(id, dto).then((data) => ok(data, 'Đã cập nhật nội dung')); }
+
+  @Delete('articles/:id')
+  archiveArticle(@Req() req: AuthenticatedRequest, @Param('id') id: string) {
+    return this.news.archiveArticle(authUser(req).id, id).then((data) => ok(data, 'Đã lưu trữ bài viết'));
+  }
 
   @Post('articles/:id/editorialize')
   async editorializeArticle(@Param('id') id: string, @Body() dto: RequestNewsEditorialDto) {

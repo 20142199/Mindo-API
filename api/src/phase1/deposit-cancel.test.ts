@@ -16,7 +16,7 @@ const deposit = (overrides: Record<string, unknown> = {}) => ({
 });
 
 const serviceWith = (prisma: unknown) =>
-  new Phase1Service(prisma as never, {} as never, {} as never, {} as never, {} as never);
+  new Phase1Service(prisma as never, {} as never, {} as never, {} as never, {} as never, { isConfigured: () => false } as never);
 
 describe('cancel a deposit', () => {
   it('does not reveal a deposit that belongs to someone else', async () => {

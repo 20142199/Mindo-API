@@ -18,6 +18,7 @@ import { Phase2Module } from './phase2/phase2.module';
 import { ReferralModule } from './referral/referral.module';
 import { HealthController } from './health.controller';
 import { WithdrawalModule } from './withdrawal/withdrawal.module';
+import { AnalyticsModule } from './analytics/analytics.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { WithdrawalModule } from './withdrawal/withdrawal.module';
     Phase2Module,
     ReferralModule,
     WithdrawalModule,
+    AnalyticsModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

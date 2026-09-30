@@ -15,7 +15,8 @@
     "prisma:generate": "prisma generate",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:migrate": "prisma migrate dev --name phase1",
-    "prisma:seed": "tsx prisma/seed.ts"
+    "prisma:seed": "tsx prisma/seed.ts",
+    "prisma:seed:product": "tsx prisma/seed-product.ts"
   },
   "dependencies": {
     "@nestjs/bullmq": "^11.0.0",

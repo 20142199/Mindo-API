@@ -9,4 +9,8 @@ describe('statusDisplay', () => {
   it('uses a warning treatment for pending reviews', () => {
     expect(statusDisplay('PENDING')).toEqual({ label: 'Chờ duyệt', tone: 'warning' });
   });
+
+  it('labels a cancelled deposit or order instead of showing the raw enum in green', () => {
+    expect(statusDisplay('CANCELLED')).toEqual({ label: 'Đã huỷ', tone: 'danger' });
+  });
 });

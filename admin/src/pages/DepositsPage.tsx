@@ -27,23 +27,29 @@ export function DepositsPage() {
     const text = `${row.transferCode} ${row.user.fullName} ${row.user.email} ${row.bankTransactionId ?? ''}`.toLowerCase();
     return text.includes(query.trim().toLowerCase()) && (status === 'ALL' || row.status === status);
   }), [rows, query, status]);
-  const pending = rows.filter((row) => row.status === 'PENDING').length;
-  const confirmedTotal = rows.filter((row) => row.status === 'CONFIRMED').reduce((sum, row) => sum + Number(row.amountVnd), 0);
-  const expired = rows.filter((row) => row.qr_expired).length;
+  const pendingRows = rows.filter((row) => row.status === 'PENDING');
+  const confirmedRows = rows.filter((row) => row.status === 'CONFIRMED');
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const confirmedTotal = confirmedRows.reduce((sum, row) => sum + Number(row.amountVnd), 0);
+  const confirmedToday = confirmedRows
+    .filter((row) => new Date(row.paidAt ?? row.createdAt) >= startOfToday)
+    .reduce((sum, row) => sum + Number(row.amountVnd), 0);
+  const pendingTotal = pendingRows.reduce((sum, row) => sum + Number(row.amountVnd), 0);
 
   return <div className={selected ? 'page operations-page operations-drawer-open' : 'page operations-page'}>
     <section className="operations-main">
-      <div className="page-title-row"><div><h1>Nạp tiền VietQR</h1><p>Tiền vào được đối soát, ghi có tự động qua callback VietQR.</p></div><button className="outline-button" onClick={() => void load()}><RefreshCw size={17} /> Làm mới</button></div>
+      <div className="page-title-row"><div><h1>Lịch sử nạp tiền</h1><p>Theo dõi toàn bộ lệnh nạp; tiền vào được đối soát và ghi có tự động qua callback VietQR.</p></div><button className="outline-button" onClick={() => void load()}><RefreshCw size={17} /> Làm mới</button></div>
       {error ? <div className="error-banner">{error}</div> : null}
       <section className="metric-row">
-        <Metric label="Tổng lệnh nạp" value={rows.length.toLocaleString('vi-VN')} icon={WalletCards} />
-        <Metric label="Chờ thanh toán" value={pending.toLocaleString('vi-VN')} icon={Clock3} />
-        <Metric label="QR đã hết hạn" value={expired.toLocaleString('vi-VN')} icon={CreditCard} />
-        <Metric label="Đã ghi có" value={money.format(confirmedTotal)} icon={Banknote} moneyValue />
+        <Metric label="Tổng tiền đã nạp" value={money.format(confirmedTotal)} icon={Banknote} moneyValue />
+        <Metric label="Tiền nạp hôm nay" value={money.format(confirmedToday)} icon={Clock3} moneyValue />
+        <Metric label={`Đang chờ (${pendingRows.length} lệnh)`} value={money.format(pendingTotal)} icon={CreditCard} moneyValue />
+        <Metric label="Tổng số giao dịch" value={rows.length.toLocaleString('vi-VN')} icon={WalletCards} />
       </section>
       <section className="work-panel">
-        <div className="filters compact-filters"><label className="search"><Search size={18} /><input aria-label="Tìm lệnh nạp" placeholder="Tìm mã nạp, người dùng hoặc mã ngân hàng" value={query} onChange={(event) => setQuery(event.target.value)} /></label><label className="select-label"><span>Trạng thái</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="ALL">Tất cả</option><option value="PENDING">Chờ thanh toán</option><option value="CONFIRMED">Đã ghi có</option><option value="REJECTED">Đã từ chối</option></select></label></div>
-        <div className="table-heading"><h2>Danh sách lệnh nạp</h2></div>
+        <div className="filters compact-filters"><label className="search"><Search size={18} /><input aria-label="Tìm lệnh nạp" placeholder="Tìm mã nạp, người dùng hoặc mã ngân hàng" value={query} onChange={(event) => setQuery(event.target.value)} /></label><label className="select-label"><span>Trạng thái</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="ALL">Tất cả</option><option value="PENDING">Chờ thanh toán</option><option value="CONFIRMED">Đã ghi có</option><option value="REJECTED">Đã từ chối</option><option value="CANCELLED">Khách đã huỷ</option></select></label></div>
+        <div className="table-heading"><h2>Lịch sử giao dịch nạp</h2></div>
         <div className="table-scroll"><table><thead><tr><th>Mã nạp</th><th>Khách hàng</th><th>Số tiền</th><th>Đối soát</th><th>Trạng thái</th><th>Ngày tạo</th><th>Thao tác</th></tr></thead><tbody>
           {visible.map((row) => { const display = depositStatus(row); return <tr key={row.id} className={selected?.id === row.id ? 'selected-row' : ''}><td><strong>{row.transferCode}</strong><small>{row.vietQrOrderId || row.id}</small></td><td><strong>{row.user.fullName}</strong><small>{row.user.email}</small></td><td>{money.format(Number(row.amountVnd))}</td><td>{row.bankTransactionId ? <><strong>{row.bankTransactionId}</strong><small>{row.bankReferenceNumber || 'Đã nhận callback'}</small></> : row.qr_expired ? <span className="status danger">QR hết hạn</span> : <span className="muted-cell">Chưa nhận tiền</span>}</td><td><span className={`status ${display.tone}`}>{display.label}</span></td><td>{dateTime.format(new Date(row.createdAt))}</td><td><button className="text-button" onClick={() => setSelected(row)}>Xem chi tiết</button></td></tr>; })}
           {visible.length === 0 ? <tr><td colSpan={7} className="empty">Không có lệnh nạp phù hợp.</td></tr> : null}

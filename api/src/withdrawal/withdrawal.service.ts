@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { Prisma, UserStatus, Withdrawal, WithdrawalStatus } from '@prisma/client';
 import { PrismaService } from '../common/prisma.module';
 import { PushNotificationService } from '../notification/push-notification.service';
+import { TelegramNotificationService } from '../notification/telegram-notification.service';
 import { FileStorageService } from '../phase1/file-storage.service';
 import { ApproveWithdrawalDto, CreateWithdrawalDto, RejectWithdrawalDto } from './withdrawal.dto';
 
@@ -13,6 +14,7 @@ export class WithdrawalService {
     private readonly prisma: PrismaService,
     private readonly files: FileStorageService,
     private readonly push: PushNotificationService,
+    private readonly telegram: TelegramNotificationService,
   ) {}
 
   async create(userId: string, idempotencyKey: string, dto: CreateWithdrawalDto) {
@@ -29,7 +31,7 @@ export class WithdrawalService {
           });
           if (existing) {
             this.assertSameCreateRequest(existing, dto, amount);
-            return existing;
+            return { row: existing, changed: false };
           }
 
           const debited = await tx.user.updateMany({
@@ -66,9 +68,10 @@ export class WithdrawalService {
           await tx.auditLog.create({
             data: { actorId: userId, action: 'WITHDRAWAL_CREATED', entityType: 'Withdrawal', entityId: withdrawal.id, metadata: { amountVnd: amount.toString() } },
           });
-          return withdrawal;
+          return { row: withdrawal, changed: true };
         }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
-        return this.attachProof([result]).then(([row]) => row);
+        if (result.changed) await this.notifyTelegramCreated(result.row);
+        return this.attachProof([result.row]).then(([row]) => row);
       } catch (error) {
         if (this.isPrismaError(error, 'P2002')) {
           const existing = await this.prisma.withdrawal.findUnique({ where: { userId_idempotencyKey: { userId, idempotencyKey: key } } });
@@ -98,19 +101,42 @@ export class WithdrawalService {
   async adminList(status?: WithdrawalStatus) {
     const rows = await this.prisma.withdrawal.findMany({
       where: status ? { status } : {},
-      include: { user: { select: { id: true, email: true, fullName: true, phone: true, balanceVnd: true } } },
+      include: {
+        user: { select: { id: true, email: true, fullName: true, phone: true, balanceVnd: true } },
+        reviewedBy: { select: { id: true, email: true, fullName: true, role: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
     return this.attachProof(rows);
   }
 
   async adminDetail(id: string) {
-    const row = await this.prisma.withdrawal.findUnique({
-      where: { id },
-      include: { user: { select: { id: true, email: true, fullName: true, phone: true, balanceVnd: true } } },
-    });
+    const [row, history] = await Promise.all([
+      this.prisma.withdrawal.findUnique({
+        where: { id },
+        include: {
+          user: { select: { id: true, email: true, fullName: true, phone: true, balanceVnd: true } },
+          reviewedBy: { select: { id: true, email: true, fullName: true, role: true } },
+        },
+      }),
+      this.prisma.auditLog.findMany({
+        where: { entityType: 'Withdrawal', entityId: id },
+        include: { actor: { select: { id: true, email: true, fullName: true, role: true } } },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
     if (!row) throw new NotFoundException('Không tìm thấy lệnh rút');
-    return this.attachProof([row]).then(([item]) => item);
+    const [item] = await this.attachProof([row]);
+    return {
+      ...item,
+      history: history.map((event) => ({
+        id: event.id,
+        action: event.action,
+        metadata: event.metadata,
+        createdAt: event.createdAt,
+        actor: event.actor,
+      })),
+    };
   }
 
   async approve(actorId: string, id: string, dto: ApproveWithdrawalDto) {
@@ -145,7 +171,10 @@ export class WithdrawalService {
       if (this.isPrismaError(error, 'P2002')) throw new BadRequestException('Mã giao dịch ngân hàng đã được sử dụng');
       throw error;
     }
-    if (result.changed) await this.notifyResult(result.row.userId, result.row.id, result.row.amountVnd, 'APPROVED');
+    if (result.changed) {
+      await this.notifyResult(result.row.userId, result.row.id, result.row.amountVnd, 'APPROVED');
+      await this.notifyTelegramReviewed(actorId, result.row, 'APPROVED', transactionCode);
+    }
     return this.attachProof([result.row]).then(([row]) => row);
   }
 
@@ -183,7 +212,10 @@ export class WithdrawalService {
       });
       return { row: await tx.withdrawal.findUniqueOrThrow({ where: { id } }), changed: true };
     });
-    if (result.changed) await this.notifyResult(result.row.userId, result.row.id, result.row.amountVnd, 'REJECTED', dto.reason.trim());
+    if (result.changed) {
+      await this.notifyResult(result.row.userId, result.row.id, result.row.amountVnd, 'REJECTED', dto.reason.trim());
+      await this.notifyTelegramReviewed(actorId, result.row, 'REJECTED', undefined, dto.reason.trim());
+    }
     return this.attachProof([result.row]).then(([row]) => row);
   }
 
@@ -218,6 +250,53 @@ export class WithdrawalService {
     } catch (error) {
       this.logger.warn(`Không gửi được thông báo lệnh rút ${withdrawalId}: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  private async notifyTelegramCreated(row: Withdrawal) {
+    if (!this.telegram.isConfigured()) return;
+    const customer = await this.prisma.user.findUnique({
+      where: { id: row.userId },
+      select: { fullName: true, email: true },
+    });
+    if (!customer) return;
+    await this.telegram.notifyWithdrawalCreated({
+      id: row.id,
+      amountVnd: row.amountVnd.toString(),
+      customerName: customer.fullName,
+      customerEmail: customer.email,
+      bankName: row.bankName,
+      bankAccountNumber: row.bankAccountNumber,
+      bankAccountName: row.bankAccountName,
+    });
+  }
+
+  private async notifyTelegramReviewed(
+    actorId: string,
+    row: Withdrawal,
+    status: 'APPROVED' | 'REJECTED',
+    transactionCode?: string,
+    reason?: string,
+  ) {
+    if (!this.telegram.isConfigured()) return;
+    const [customer, reviewer] = await Promise.all([
+      this.prisma.user.findUnique({ where: { id: row.userId }, select: { fullName: true, email: true } }),
+      this.prisma.user.findUnique({ where: { id: actorId }, select: { fullName: true, email: true } }),
+    ]);
+    if (!customer || !reviewer) return;
+    await this.telegram.notifyWithdrawalReviewed({
+      id: row.id,
+      amountVnd: row.amountVnd.toString(),
+      customerName: customer.fullName,
+      customerEmail: customer.email,
+      bankName: row.bankName,
+      bankAccountNumber: row.bankAccountNumber,
+      bankAccountName: row.bankAccountName,
+      status,
+      reviewerName: reviewer.fullName,
+      reviewerEmail: reviewer.email,
+      transactionCode,
+      reason,
+    });
   }
 
   private assertSameCreateRequest(existing: Withdrawal, dto: CreateWithdrawalDto, amount: Prisma.Decimal) {

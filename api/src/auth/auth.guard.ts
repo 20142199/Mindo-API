@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable, SetMetad
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '@prisma/client';
+import { PrismaService } from '../common/prisma.module';
 
 export type AuthUser = { id: string; role: UserRole; sid?: string };
 export type AuthenticatedRequest = { headers: { authorization?: string }; user?: AuthUser };
@@ -10,7 +11,11 @@ export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(private readonly jwt: JwtService, private readonly reflector: Reflector) {}
+  constructor(
+    private readonly jwt: JwtService,
+    private readonly reflector: Reflector,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async canActivate(context: ExecutionContext) {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
@@ -22,6 +27,17 @@ export class JwtAuthGuard implements CanActivate {
       });
     } catch {
       throw new UnauthorizedException('Access token không hợp lệ hoặc đã hết hạn');
+    }
+    if (!request.user.sid || !(await this.prisma.refreshToken.findFirst({
+      where: {
+        id: request.user.sid,
+        userId: request.user.id,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      select: { id: true },
+    }))) {
+      throw new UnauthorizedException('Phiên đăng nhập không còn hiệu lực');
     }
     const roles = this.reflector.getAllAndOverride<UserRole[]>(ROLES_KEY, [
       context.getHandler(),

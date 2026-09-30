@@ -29,7 +29,7 @@ export function WithdrawalsPage() {
     try {
       const next = await api.withdrawals();
       setRows(next);
-      if (selected) setSelected(next.find((row) => row.id === selected.id));
+      if (selected) setSelected(await api.withdrawalDetail(selected.id));
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Không thể tải lệnh rút'); }
   }
 
@@ -42,9 +42,15 @@ export function WithdrawalsPage() {
   const pending = rows.filter((row) => row.status === 'PENDING');
   const approved = rows.filter((row) => row.status === 'APPROVED');
   const rejected = rows.filter((row) => row.status === 'REJECTED');
+  const pendingTotal = pending.reduce((sum, row) => sum + Number(row.amountVnd), 0);
+  const approvedTotal = approved.reduce((sum, row) => sum + Number(row.amountVnd), 0);
+  const refundedTotal = rejected.reduce((sum, row) => sum + Number(row.amountVnd), 0);
 
   function open(row: WithdrawalRow) {
     setSelected(row); setTransactionCode(''); setProof(undefined); setReviewNote(''); setRejectionReason(''); setError(''); setMessage('');
+    void api.withdrawalDetail(row.id)
+      .then((detail) => setSelected(detail))
+      .catch((reason) => setError(reason instanceof Error ? reason.message : 'Không thể tải nhật ký lệnh rút'));
   }
 
   async function approve() {
@@ -74,18 +80,18 @@ export function WithdrawalsPage() {
 
   return <div className={selected ? 'page operations-page operations-drawer-open' : 'page operations-page'}>
     <section className="operations-main">
-      <div className="page-title-row"><div><h1>Rút tiền</h1><p>Duyệt chuyển khoản và kiểm soát hoàn tiền cho từng lệnh rút.</p></div><button className="outline-button" onClick={() => void load()}><RefreshCw size={17} /> Làm mới</button></div>
+      <div className="page-title-row"><div><h1>Lịch sử rút tiền</h1><p>Theo dõi toàn bộ lệnh rút; thủ quỹ duyệt chuyển khoản hoặc từ chối và hoàn tiền.</p></div><button className="outline-button" onClick={() => void load()}><RefreshCw size={17} /> Làm mới</button></div>
       {error ? <div className="error-banner">{error}</div> : null}
       {message ? <div className="success-banner"><Check size={16} /> {message}</div> : null}
       <section className="metric-row">
-        <Metric label="Chờ duyệt" value={pending.length.toLocaleString('vi-VN')} icon={Clock3} />
-        <Metric label="Số tiền đang giữ" value={money.format(pending.reduce((sum, row) => sum + Number(row.amountVnd), 0))} icon={HandCoins} />
-        <Metric label="Đã chuyển thành công" value={approved.length.toLocaleString('vi-VN')} icon={ShieldCheck} />
-        <Metric label="Đã hoàn tiền" value={rejected.length.toLocaleString('vi-VN')} icon={RotateCcw} />
+        <Metric label="Tổng tiền đã rút" value={money.format(approvedTotal)} icon={ShieldCheck} />
+        <Metric label={`Đang chờ (${pending.length} lệnh)`} value={money.format(pendingTotal)} icon={Clock3} />
+        <Metric label={`Đã hoàn (${rejected.length} lệnh)`} value={money.format(refundedTotal)} icon={RotateCcw} />
+        <Metric label="Tổng số lệnh rút" value={rows.length.toLocaleString('vi-VN')} icon={HandCoins} />
       </section>
       <section className="work-panel">
         <div className="filters compact-filters"><label className="search"><Search size={18} /><input aria-label="Tìm lệnh rút" placeholder="Tìm user, ngân hàng, số tài khoản hoặc mã giao dịch" value={query} onChange={(event) => setQuery(event.target.value)} /></label><label className="select-label"><span>Trạng thái</span><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="ALL">Tất cả</option><option value="PENDING">Chờ duyệt</option><option value="APPROVED">Đã chuyển tiền</option><option value="REJECTED">Đã từ chối &amp; hoàn tiền</option></select></label></div>
-        <div className="table-heading"><h2>Danh sách lệnh rút</h2></div>
+        <div className="table-heading"><h2>Lịch sử giao dịch rút</h2></div>
         <div className="table-scroll"><table><thead><tr><th>Mã lệnh</th><th>Khách hàng</th><th>Số tiền</th><th>Ngân hàng nhận</th><th>Trạng thái</th><th>Ngày tạo</th><th>Thao tác</th></tr></thead><tbody>
           {visible.map((row) => { const display = statusMeta(row.status); return <tr key={row.id} className={selected?.id === row.id ? 'selected-row' : ''}><td><strong>WD#{row.id.slice(-8).toUpperCase()}</strong></td><td><strong>{row.user.fullName}</strong><small>{row.user.email}</small></td><td><strong>{money.format(Number(row.amountVnd))}</strong><small>Đã giữ khỏi số dư</small></td><td><strong>{row.bankName}</strong><small>{row.bankAccountNumber}</small></td><td><span className={`status ${display.tone}`}>{display.label}</span></td><td>{dateTime.format(new Date(row.createdAt))}</td><td><button className="text-button" onClick={() => open(row)}>Xem chi tiết</button></td></tr>; })}
           {visible.length === 0 ? <tr><td className="empty" colSpan={7}>Không có lệnh rút phù hợp.</td></tr> : null}
@@ -122,10 +128,18 @@ function WithdrawalDrawer({ row, transactionCode, reviewNote, rejectionReason, p
       <div className="withdrawal-reject"><h3>Từ chối &amp; hoàn tiền</h3><label>Lý do từ chối<textarea value={rejectionReason} onChange={(event) => onRejectionReason(event.target.value)} placeholder="Lý do này sẽ được gửi cho user" /></label><button className="reject-button" disabled={busy || rejectionReason.trim().length < 3} onClick={onReject}>Từ chối và hoàn tiền</button></div>
     </section> : <section className="withdrawal-result">
       <h3>{row.status === 'APPROVED' ? 'Thông tin chuyển khoản' : 'Thông tin hoàn tiền'}</h3>
-      <dl>{row.status === 'APPROVED' ? <><Info label="Mã giao dịch" value={row.bankTransactionCode || '—'} /><Info label="Ngày duyệt" value={row.reviewedAt ? dateTime.format(new Date(row.reviewedAt)) : '—'} /></> : <><Info label="Lý do" value={row.rejectionReason || row.reviewNote || '—'} /><Info label="Đã hoàn lúc" value={row.refundedAt ? dateTime.format(new Date(row.refundedAt)) : '—'} /></>}</dl>
+      <dl><Info label="Người xử lý" value={row.reviewedBy ? `${row.reviewedBy.fullName} (${row.reviewedBy.email})` : '—'} />{row.status === 'APPROVED' ? <><Info label="Cách xử lý" value="Chuyển khoản ngân hàng và tải ảnh xác nhận" /><Info label="Mã giao dịch" value={row.bankTransactionCode || '—'} /><Info label="Ngày duyệt" value={row.reviewedAt ? dateTime.format(new Date(row.reviewedAt)) : '—'} /><Info label="Ghi chú" value={row.reviewNote || '—'} /></> : <><Info label="Cách xử lý" value="Từ chối và hoàn lại số dư Mindo" /><Info label="Lý do" value={row.rejectionReason || row.reviewNote || '—'} /><Info label="Đã hoàn lúc" value={row.refundedAt ? dateTime.format(new Date(row.refundedAt)) : '—'} /></>}</dl>
       {row.status === 'APPROVED' && row.transferProof?.public_url ? <a className="proof-preview" href={row.transferProof.public_url} target="_blank" rel="noreferrer"><img src={row.transferProof.public_url} alt="Ảnh chuyển khoản thành công" /><span>Xem ảnh chuyển khoản</span></a> : null}
     </section>}
+    <section className="withdrawal-result withdrawal-history"><h3>Nhật ký xử lý</h3>{row.history?.length ? <dl>{row.history.map((event) => <div key={event.id}><dt>{dateTime.format(new Date(event.createdAt))}</dt><dd><strong>{historyLabel(event.action)}</strong><small>{event.actor ? `${event.actor.fullName} · ${event.actor.email}` : 'Hệ thống tự động'}</small></dd></div>)}</dl> : <p className="muted-cell">Đang tải nhật ký…</p>}</section>
   </aside>;
+}
+
+function historyLabel(action: string) {
+  if (action === 'WITHDRAWAL_CREATED') return 'Tạo lệnh và giữ số dư';
+  if (action === 'WITHDRAWAL_APPROVED') return 'Duyệt và xác nhận đã chuyển tiền';
+  if (action === 'WITHDRAWAL_REJECTED_REFUNDED') return 'Từ chối và hoàn tiền';
+  return action;
 }
 
 function DrawerSection({ title, children }: { title: string; children: React.ReactNode }) { return <section className="drawer-section"><h3>{title}</h3><dl>{children}</dl></section>; }

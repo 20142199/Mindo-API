@@ -36,6 +36,7 @@ describe('web Peer purchase quote', () => {
       {} as never,
       {} as never,
       {} as never,
+      { isConfigured: () => false } as never,
     );
 
     const quote = await service.calculatePrice('buyer', 'peer', 50);

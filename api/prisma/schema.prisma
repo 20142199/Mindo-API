@@ -898,6 +898,7 @@ model NewsArticle {
   aiEditorialTotalTokens  Int?
   aiEditorialAt           DateTime?
   publishedAt             DateTime?
+  deletedAt               DateTime?
   createdAt               DateTime              @default(now())
   updatedAt               DateTime              @updatedAt
   topic                   NewsTopic?            @relation(fields: [topicId], references: [id], onDelete: SetNull)
@@ -914,6 +915,7 @@ model NewsArticle {
   @@index([contentType, status, publishedAt])
   @@index([sourceId, sourcePublishedAt])
   @@index([aiEditorialStatus, createdAt])
+  @@index([deletedAt, createdAt])
 }
 
 model NewsSource {

@@ -1,41 +1,44 @@
-# Design QA — Desktop login inputs
+# Design QA — Admin account menu and password dialog
 
-- Source visual truth: `/var/folders/p7/tss0w0ps4gd7_tpsj9p5vpdc0000gn/T/TemporaryItems/NSIRD_screencaptureui_M4mmzO/Screenshot 2026-09-21 at 05.19.00.png`
-- Implementation screenshot: `/private/tmp/mindo-login-input-revised.png`
-- Browser verification: Codex in-app browser, `http://127.0.0.1:5174/`
-- Source pixels: 886 × 898. The source appears to be a 2× crop; the 96 px input maps to a 48 px CSS control.
-- Implementation pixels / viewport: 886 × 898 at device scale factor 1.
-- State: desktop login, empty email and password inputs.
+- Source visual truth: `/var/folders/p7/tss0w0ps4gd7_tpsj9p5vpdc0000gn/T/TemporaryItems/NSIRD_screencaptureui_mflwt9/Screenshot 2026-09-30 at 19.56.51.png`
+- Implementation screenshot: Codex in-app browser capture of `https://admin-mindo.stg-studio.com/ai-experts`
+- Browser verification: Codex in-app browser on production.
+- Source pixels: 338 × 156; visually a 2× crop, normalized CSS region about 169 × 78.
+- Implementation pixels / viewport: 1280 × 720 screenshot, 1280 × 720 CSS viewport, reported device pixel ratio 2.
+- State: authenticated desktop admin; closed account control, open dropdown, and open change-password dialog.
 
 ## Full-view comparison evidence
 
-The implementation keeps the existing Mindo desktop split layout while matching the reference's desktop control density. The input height is now 48 px rather than the 56 px mobile control height. The navy product identity remains intentional and outside the scope of this input-only change.
+The implementation retains the white top bar, left divider, pale-blue 42 px circular avatar, navy account name, muted role and right-aligned chevron from the source. The menu opens beneath the account control without shifting the page.
 
-## Focused input comparison evidence
+## Focused region comparison evidence
 
-- Height: reference normalized to 48 px; implementation computed at 48 px.
-- Background: reference white; implementation `rgb(255, 255, 255)`.
-- Border: reference thin light gray; implementation `1px solid rgb(223, 228, 234)`.
-- Radius: reference medium rounded corners; implementation 11 px.
-- Icons: reduced to 19 px with a lighter gray treatment.
-- Mobile behavior: the existing 56 px / 16 px-radius touch controls remain under the mobile breakpoint.
+- Source avatar normalizes to 42 px; implementation measured at 42 px.
+- Source name/role hierarchy normalizes to approximately 14 px/11 px; implementation uses 14 px/11 px.
+- The account control is keyboard-focusable and exposes its expanded state.
+- The dropdown and password dialog use the existing Mindo navy, pale-blue surfaces, border radii, shadows and Lucide icon family.
+- No raster imagery or custom-drawn substitute assets are involved in this UI.
 
 ## Findings
 
-No actionable P0/P1/P2 differences remain for the requested desktop input treatment.
+No actionable P0/P1/P2 visual differences remain for the requested account control. The source does not define the dropdown or dialog states; those states intentionally extend the existing admin design system.
 
 ## Comparison history
 
-- Earlier finding (P2): desktop used the mobile 56 px control height, 16 px radius, and filled gray surface.
-- Fix: changed desktop inputs to 48 px, 11 px radius, white surface, thinner border, and smaller icons; retained mobile dimensions in the responsive override.
-- Post-fix evidence: `/private/tmp/mindo-login-input-revised.png`; computed browser dimensions confirm 48 px height.
+- Earlier finding (P2): the account area was static and the separate logout icon conflicted with the expected dropdown affordance.
+- Fix: converted the whole profile area into an accessible menu button, moved logout into the menu, and added the change-password dialog.
+- Earlier finding (P3): account typography appeared slightly smaller than the 2× source crop.
+- Fix: aligned avatar/name/role text to 13 px/14 px/11 px.
+- Post-fix evidence: production browser capture and measured 42 px avatar/account control geometry.
 
-## Primary interaction and console checks
+## Primary interactions and console checks
 
-- Email and password fields remain editable.
-- Password visibility button remains available.
-- Login submit action remains wired to the existing API.
+- Clicking the profile opens and closes the account dropdown.
+- “Đổi mật khẩu” opens the dialog containing current, new and confirmation fields.
+- Show/hide password controls are present for all three inputs.
+- A mismatched confirmation is blocked client-side with a Vietnamese error.
+- The success flow clears the local session and requires login with the new password.
 - Browser console check returned no errors or warnings.
-- Build and automated Admin tests pass.
+- API/admin builds and automated tests pass.
 
 final result: passed

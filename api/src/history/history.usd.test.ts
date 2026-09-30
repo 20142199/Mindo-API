@@ -103,7 +103,7 @@ describe('USD on an owned Peer', () => {
       nftAsset: { findFirst: vi.fn().mockResolvedValue(asset) },
       agencyPackageSetting: { findUnique: vi.fn().mockResolvedValue({ usdVndRate: new Prisma.Decimal('25000') }) },
     };
-    const service = new Phase1Service(prisma as never, {} as never, {} as never, {} as never, {} as never);
+    const service = new Phase1Service(prisma as never, {} as never, {} as never, {} as never, {} as never, { isConfigured: () => false } as never);
 
     const peer = await service.myNftDetail('investor', 'asset-1');
 
