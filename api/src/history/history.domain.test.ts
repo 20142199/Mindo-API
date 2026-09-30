@@ -11,6 +11,10 @@ describe('history domain', () => {
     expect(depositHistoryStatus(DepositStatus.REJECTED)).toBe('failed');
   });
 
+  it('maps a cancelled deposit to the cancelled history status', () => {
+    expect(depositHistoryStatus(DepositStatus.CANCELLED)).toBe('cancelled');
+  });
+
   it('uses Vietnam day boundaries and rejects reversed dates', () => {
     const range = historyDateRange('2026-09-01', '2026-09-17');
     expect(range?.gte?.toISOString()).toBe('2026-08-31T17:00:00.000Z');

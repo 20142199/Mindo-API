@@ -286,6 +286,7 @@ export class HistoryService {
   private depositStatus(status: HistoryStatus): DepositStatus {
     if (status === HistoryStatus.COMPLETED) return DepositStatus.CONFIRMED;
     if (status === HistoryStatus.PENDING) return DepositStatus.PENDING;
+    if (status === HistoryStatus.CANCELLED) return DepositStatus.CANCELLED;
     return DepositStatus.REJECTED;
   }
 }

@@ -25,6 +25,7 @@ export function orderHistoryStatus(status: OrderStatus): HistoryStatus {
 export function depositHistoryStatus(status: DepositStatus): HistoryStatus {
   if (status === DepositStatus.CONFIRMED) return HistoryStatus.COMPLETED;
   if (status === DepositStatus.PENDING) return HistoryStatus.PENDING;
+  if (status === DepositStatus.CANCELLED) return HistoryStatus.CANCELLED;
   return HistoryStatus.FAILED;
 }
 
