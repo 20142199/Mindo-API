@@ -1,6 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
-import { DepositStatus, OrderStatus } from '@prisma/client';
+import { DepositStatus, OrderStatus, Prisma } from '@prisma/client';
 import { HistoryStatus } from './history.dto';
+
+/** Tỷ giá dự phòng khi chưa có cấu hình gói (khớp mặc định của `agencyPackageSetting`). */
+export const DEFAULT_USD_VND_RATE = new Prisma.Decimal(25_000);
+
+export const vndToUsd = (vnd: Prisma.Decimal, rate: Prisma.Decimal) => vnd.div(rate).toFixed(2);
 
 const vietnamMonth = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Ho_Chi_Minh',
@@ -25,6 +30,7 @@ export function orderHistoryStatus(status: OrderStatus): HistoryStatus {
 export function depositHistoryStatus(status: DepositStatus): HistoryStatus {
   if (status === DepositStatus.CONFIRMED) return HistoryStatus.COMPLETED;
   if (status === DepositStatus.PENDING) return HistoryStatus.PENDING;
+  if (status === DepositStatus.CANCELLED) return HistoryStatus.CANCELLED;
   return HistoryStatus.FAILED;
 }
 

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ArticleStatus, DepositStatus, OrderStatus, Prisma, ReviewStatus, UserRole } from '@prisma/client';
 import { PrismaService } from '../common/prisma.module';
@@ -12,6 +12,7 @@ import { ReferralService } from '../referral/referral.service';
 import { agencyTiers, priceAgencyPackages } from '../phase2/phase2.domain';
 import { isReferralCodeShape } from '../referral/referral.domain';
 import { pageExtra } from '../common/api-response';
+import { DEFAULT_USD_VND_RATE, vndToUsd } from '../history/history.domain';
 
 type SignedPurchaseQuote = {
   sub: string;
@@ -188,6 +189,20 @@ export class Phase1Service {
     return this.depositView(created);
   }
 
+  /** Người dùng tự huỷ lệnh nạp đang chờ. Tiền về sau khi huỷ vẫn được webhook cộng. */
+  async cancelDeposit(userId: string, id: string) {
+    const deposit = await this.prisma.deposit.findFirst({ where: { id, userId } });
+    if (!deposit) throw new NotFoundException('Không tìm thấy lệnh nạp');
+    if (deposit.status === DepositStatus.CANCELLED) return this.depositView(deposit);
+    if (deposit.status !== DepositStatus.PENDING) throw new ConflictException('Lệnh nạp đã được xử lý, không thể huỷ');
+    const updated = await this.prisma.deposit.update({
+      where: { id },
+      data: { status: DepositStatus.CANCELLED, reviewedAt: new Date(), reviewNote: 'Người dùng huỷ' },
+    });
+    await this.prisma.auditLog.create({ data: { actorId: userId, action: 'DEPOSIT_CANCELLED', entityType: 'Deposit', entityId: id } });
+    return this.depositView(updated);
+  }
+
   async listDeposits(userId?: string, status?: DepositStatus) {
     const rows = await this.prisma.deposit.findMany({
       where: { ...(userId ? { userId } : {}), ...(status ? { status } : {}) },
@@ -207,7 +222,7 @@ export class Phase1Service {
       if (!deposit) deposit = await tx.deposit.findUnique({ where: { transferCode: dto.content.trim() } });
       if (!deposit) {
         const recent = await tx.deposit.findMany({
-          where: { status: { in: [DepositStatus.PENDING, DepositStatus.CONFIRMED] } },
+          where: { status: { in: [DepositStatus.PENDING, DepositStatus.CONFIRMED, DepositStatus.CANCELLED] } },
           orderBy: { createdAt: 'desc' },
           take: 200,
         });
@@ -219,7 +234,9 @@ export class Phase1Service {
         if (deposit.bankTransactionId === dto.transactionid) return this.depositView(deposit);
         throw new BadRequestException('Lệnh nạp đã được thanh toán');
       }
-      if (deposit.status !== DepositStatus.PENDING) throw new BadRequestException('Lệnh nạp không còn chờ thanh toán');
+      // Lệnh đã huỷ vẫn nhận tiền: khách có thể chuyển khoản xong rồi mới bấm huỷ.
+      const cancelled = deposit.status === DepositStatus.CANCELLED;
+      if (deposit.status !== DepositStatus.PENDING && !cancelled) throw new BadRequestException('Lệnh nạp không còn chờ thanh toán');
       const paidAmount = new Prisma.Decimal(dto.amount);
       if (paidAmount.lessThan(deposit.amountVnd)) throw new BadRequestException('Số tiền chuyển khoản chưa đủ');
       const user = await tx.user.findUniqueOrThrow({ where: { id: deposit.userId } });
@@ -236,7 +253,7 @@ export class Phase1Service {
           balanceBeforeVnd: user.balanceVnd,
           balanceAfterVnd: balanceAfter,
           reviewedAt: new Date(),
-          reviewNote: 'Xác nhận tự động qua webhook VietQR',
+          reviewNote: cancelled ? 'Xác nhận tự động qua webhook VietQR (tiền về sau khi lệnh đã huỷ)' : 'Xác nhận tự động qua webhook VietQR',
         },
       });
       await tx.user.update({ where: { id: deposit.userId }, data: { balanceVnd: balanceAfter } });
@@ -475,7 +492,7 @@ export class Phase1Service {
         ],
       } : {}),
     };
-    const [total, rows] = await Promise.all([
+    const [total, rows, currentRate] = await Promise.all([
       this.prisma.nftAsset.count({ where }),
       this.prisma.nftAsset.findMany({
         where,
@@ -484,8 +501,9 @@ export class Phase1Service {
         skip: (page - 1) * limit,
         take: limit,
       }),
+      this.currentUsdRate(),
     ]);
-    return { data: rows.map((row) => this.nftAssetView(row)), extra: pageExtra(page, limit, total) };
+    return { data: rows.map((row) => this.nftAssetView(row, currentRate)), extra: pageExtra(page, limit, total) };
   }
 
   async myNftDetail(userId: string, id: string) {
@@ -494,7 +512,7 @@ export class Phase1Service {
       include: { product: true, order: true },
     });
     if (!row) throw new NotFoundException('Không tìm thấy NFT trong tài khoản');
-    return this.nftAssetView(row);
+    return this.nftAssetView(row, await this.currentUsdRate());
   }
 
   async purchaseOrderDetail(userId: string, id: string) {
@@ -598,6 +616,11 @@ export class Phase1Service {
     return { userId: agency.user.id, name: agency.user.fullName, code: agency.code };
   }
 
+  private async currentUsdRate() {
+    const settings = await this.prisma.agencyPackageSetting.findUnique({ where: { id: 'default' } });
+    return settings?.usdVndRate ?? DEFAULT_USD_VND_RATE;
+  }
+
   private packageSettings() {
     return this.prisma.agencyPackageSetting.upsert({
       where: { id: 'default' },
@@ -667,8 +690,11 @@ export class Phase1Service {
     metadataUrl: string;
     issuedAt: Date;
     product: { id: string; name: string; symbol: string; description: string; imageUrl: string; totalSupply: number; soldCount: number };
-    order: { id: string; unitPriceVnd: Prisma.Decimal; totalVnd: Prisma.Decimal; agencyTitle: string | null; createdAt: Date };
-  }) {
+    order: { id: string; quantity: number; unitPriceVnd: Prisma.Decimal; totalVnd: Prisma.Decimal; usdVndRate: Prisma.Decimal | null; agencyTitle: string | null; createdAt: Date };
+  }, currentUsdRate: Prisma.Decimal) {
+    // Giá thực trả cho một Peer = tổng đơn sau chiết khấu / số lượng, theo tỷ giá lúc mua.
+    const rate = row.order.usdVndRate ?? currentUsdRate;
+    const effectiveUnitVnd = row.order.totalVnd.div(row.order.quantity).toDecimalPlaces(0);
     return {
       id: row.id,
       asset_code: row.assetCode,
@@ -690,6 +716,10 @@ export class Phase1Service {
         order_id: row.order.id,
         unit_price_vnd: row.order.unitPriceVnd.toString(),
         order_total_vnd: row.order.totalVnd.toString(),
+        quantity: row.order.quantity,
+        effective_unit_price_vnd: effectiveUnitVnd.toString(),
+        effective_unit_price_usd: vndToUsd(effectiveUnitVnd, rate),
+        usd_vnd_rate: rate.toString(),
         agency_title: row.order.agencyTitle,
         purchased_at: row.order.createdAt.toISOString(),
       },

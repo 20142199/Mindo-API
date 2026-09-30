@@ -73,6 +73,14 @@ Backend thực hiện nguyên tử: kiểm tra KYC/số dư/nguồn cung, trừ 
 - **Bearer** `GET /investor/history/nfts`: lịch sử mua, hỗ trợ `from`, `to`, `status`, `project_id`, `page`, `limit`.
 - **Bearer** `GET /investor/history/nfts/:id`: chi tiết giao dịch.
 
+### Giá USD
+
+Quy theo tỷ giá **lúc mua** của từng đơn (`usd_vnd_rate` lưu trong đơn). Đơn tạo trước khi có cột này thì dùng tỷ giá hiện hành. Làm tròn 2 chữ số, trả dạng chuỗi.
+
+- `history/nfts`: mỗi dòng có `amount_usd`, `gross_amount_usd`, `discount_usd`; `summary.total_spent_usd` là tổng các đơn hoàn tất.
+- `history/nfts/:id`: `amount_usd`, `gross_amount_usd`, `discount_usd`.
+- `me/nfts` (chế độ phân trang) và `me/nfts/:id`: `purchase` có thêm `quantity`, `effective_unit_price_vnd` (tổng đơn sau chiết khấu / số lượng), `effective_unit_price_usd`, `usd_vnd_rate`.
+
 ## Hoa hồng và doanh số đầu nhánh
 
 - **Bearer** `GET /investor/referrals/commissions?from=2026-09-01&to=2026-09-30&type=DIRECT&page=1&limit=20`.
@@ -94,3 +102,14 @@ Backend thực hiện nguyên tử: kiểm tra KYC/số dư/nguồn cung, trừ 
 ```
 
 Thời hạn mặc định 15 phút, cấu hình bằng `VIETQR_QR_TTL_MINUTES` (5–60 phút). Lịch sử và chi tiết nạp cũng trả `expires_at` và `qr_expired`.
+
+Gửi header `Idempotency-Key` để bấm lặp không tạo hai lệnh; thiếu thì server tự sinh.
+
+### Huỷ lệnh nạp
+
+**Bearer** `POST /investor/deposits/:id/cancel`
+
+- Lệnh đang chờ → chuyển `CANCELLED`, `display_status: "cancelled"`. Gọi lại với lệnh đã huỷ trả nguyên trạng.
+- Lệnh của người khác → 404. Lệnh đã thanh toán hoặc bị từ chối → 409.
+- Lịch sử nạp hiện `status: "cancelled"` ("Đã huỷ"); bộ lọc `status=cancelled`.
+- **Tiền về sau khi huỷ vẫn được cộng**: webhook VietQR nhận cả lệnh đã huỷ và chuyển thẳng sang đã thanh toán.
