@@ -76,7 +76,7 @@ export type DepositRow = {
   expires_at?: string;
   qr_expired?: boolean;
   display_status?: string;
-  status: 'PENDING' | 'CONFIRMED' | 'REJECTED';
+  status: 'PENDING' | 'CONFIRMED' | 'REJECTED' | 'CANCELLED';
   createdAt: string;
   user: { id?: string; email: string; fullName: string; phone?: string; balanceVnd?: string };
 };
