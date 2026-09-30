@@ -12,6 +12,7 @@ import { ReferralService } from '../referral/referral.service';
 import { agencyTiers, priceAgencyPackages } from '../phase2/phase2.domain';
 import { isReferralCodeShape } from '../referral/referral.domain';
 import { pageExtra } from '../common/api-response';
+import { TelegramNotificationService } from '../notification/telegram-notification.service';
 
 type SignedPurchaseQuote = {
   sub: string;
@@ -44,6 +45,7 @@ export class Phase1Service {
     private readonly files: FileStorageService,
     private readonly vietQr: VietQrService,
     private readonly referrals: ReferralService,
+    private readonly telegram: TelegramNotificationService,
   ) {}
 
   async createKyc(userId: string, dto: CreateKycDto) {
@@ -202,7 +204,7 @@ export class Phase1Service {
     const configuredAccount = process.env.VIETQR_BANK_ACCOUNT;
     if (configuredAccount && dto.bankaccount !== configuredAccount) throw new BadRequestException('Tài khoản nhận tiền không hợp lệ');
 
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       let deposit = dto.orderId ? await tx.deposit.findUnique({ where: { vietQrOrderId: dto.orderId } }) : null;
       if (!deposit) deposit = await tx.deposit.findUnique({ where: { transferCode: dto.content.trim() } });
       if (!deposit) {
@@ -216,7 +218,7 @@ export class Phase1Service {
       }
       if (!deposit) throw new NotFoundException('Không tìm thấy lệnh nạp VietQR');
       if (deposit.status === DepositStatus.CONFIRMED) {
-        if (deposit.bankTransactionId === dto.transactionid) return this.depositView(deposit);
+        if (deposit.bankTransactionId === dto.transactionid) return { row: this.depositView(deposit), changed: false };
         throw new BadRequestException('Lệnh nạp đã được thanh toán');
       }
       if (deposit.status !== DepositStatus.PENDING) throw new BadRequestException('Lệnh nạp không còn chờ thanh toán');
@@ -252,8 +254,25 @@ export class Phase1Service {
           metadata: { transactionId: dto.transactionid, referenceNumber: dto.referencenumber, paidAmount: paidAmount.toString() },
         },
       });
-      return this.depositView(updated);
+      return { row: this.depositView(updated), changed: true };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    if (result.changed && this.telegram.isConfigured()) {
+      const customer = await this.prisma.user.findUnique({
+        where: { id: result.row.userId },
+        select: { fullName: true, email: true },
+      });
+      if (customer) {
+        await this.telegram.notifyDepositConfirmed({
+          id: result.row.id,
+          amountVnd: result.row.amountVnd.toString(),
+          customerName: customer.fullName,
+          customerEmail: customer.email,
+          transferCode: result.row.transferCode,
+          bankTransactionId: dto.transactionid,
+        });
+      }
+    }
+    return result.row;
   }
 
   listProducts(activeOnly = true) {
@@ -697,7 +716,7 @@ export class Phase1Service {
   }
 
   articles(publishedOnly = true) {
-    return this.prisma.newsArticle.findMany({ where: publishedOnly ? { status: ArticleStatus.PUBLISHED } : {}, orderBy: { publishedAt: 'desc' } });
+    return this.prisma.newsArticle.findMany({ where: { deletedAt: null, ...(publishedOnly ? { status: ArticleStatus.PUBLISHED } : {}) }, orderBy: { publishedAt: 'desc' } });
   }
 
   createArticle(dto: CreateArticleDto) {

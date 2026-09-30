@@ -36,13 +36,13 @@ export class NewsService {
         take: 10,
       }),
       this.prisma.newsArticle.findMany({
-        where: { status: ArticleStatus.PUBLISHED, contentType: NewsContentType.ARTICLE, AND: visible },
+        where: { deletedAt: null, status: ArticleStatus.PUBLISHED, contentType: NewsContentType.ARTICLE, AND: visible },
         include: articleInclude,
         orderBy: { publishedAt: 'desc' },
         take: 20,
       }),
       this.prisma.newsArticle.findMany({
-        where: { status: ArticleStatus.PUBLISHED, contentType: NewsContentType.WAVE, AND: visible },
+        where: { deletedAt: null, status: ArticleStatus.PUBLISHED, contentType: NewsContentType.WAVE, AND: visible },
         include: articleInclude,
         orderBy: { publishedAt: 'desc' },
         take: 10,
@@ -66,6 +66,7 @@ export class NewsService {
     if (forYou && !forYou.length) return { data: [], extra: pageExtra(query.page, query.limit, 0) };
     const hidden = !admin && userId ? await this.hiddenFor(userId) : NOTHING_HIDDEN;
     const where: Prisma.NewsArticleWhereInput = {
+      deletedAt: null,
       ...(admin ? {} : { status: ArticleStatus.PUBLISHED }),
       ...(query.q ? { OR: [{ title: { contains: query.q, mode: 'insensitive' } }, { summary: { contains: query.q, mode: 'insensitive' } }, { aiSummary: { contains: query.q, mode: 'insensitive' } }, { content: { contains: query.q, mode: 'insensitive' } }] } : {}),
       ...(query.topic ? { topic: { slug: query.topic } } : {}),
@@ -84,7 +85,7 @@ export class NewsService {
 
   async article(idOrSlug: string, userId?: string) {
     const row = await this.prisma.newsArticle.findFirst({
-      where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }], status: ArticleStatus.PUBLISHED },
+      where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }], status: ArticleStatus.PUBLISHED, deletedAt: null },
       include: articleInclude,
     });
     if (!row) throw new NotFoundException('Bài viết không tồn tại');
@@ -102,7 +103,7 @@ export class NewsService {
     const query = keyword.trim();
     const [articles, experts] = await Promise.all([
       this.prisma.newsArticle.findMany({
-        where: { status: ArticleStatus.PUBLISHED, OR: [{ title: { contains: query, mode: 'insensitive' } }, { summary: { contains: query, mode: 'insensitive' } }, { aiSummary: { contains: query, mode: 'insensitive' } }, { topic: { name: { contains: query, mode: 'insensitive' } } }] },
+        where: { status: ArticleStatus.PUBLISHED, deletedAt: null, OR: [{ title: { contains: query, mode: 'insensitive' } }, { summary: { contains: query, mode: 'insensitive' } }, { aiSummary: { contains: query, mode: 'insensitive' } }, { topic: { name: { contains: query, mode: 'insensitive' } } }] },
         include: articleInclude,
         orderBy: { publishedAt: 'desc' },
         take: limit,
@@ -138,7 +139,7 @@ export class NewsService {
   async expert(idOrSlug: string, userId?: string) {
     const row = await this.prisma.newsExpert.findFirst({
       where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }], isActive: true },
-      include: { _count: { select: { followers: true, articles: true } }, followers: userId ? { where: { userId }, select: { userId: true } } : false, articles: { where: { status: ArticleStatus.PUBLISHED }, include: articleInclude, orderBy: { publishedAt: 'desc' }, take: 20 } },
+      include: { _count: { select: { followers: true, articles: true } }, followers: userId ? { where: { userId }, select: { userId: true } } : false, articles: { where: { status: ArticleStatus.PUBLISHED, deletedAt: null }, include: articleInclude, orderBy: { publishedAt: 'desc' }, take: 20 } },
     });
     if (!row) throw new NotFoundException('Chuyên gia không tồn tại');
     return { ...this.expertView(row, Boolean('followers' in row && row.followers.length)), articles: row.articles.map((article) => this.articleView(article, false)) };
@@ -296,11 +297,43 @@ export class NewsService {
   createArticle(dto: SaveNewsArticleDto) { return this.saveArticle(undefined, dto); }
   updateArticle(id: string, dto: SaveNewsArticleDto) { return this.saveArticle(id, dto); }
 
+  async adminArticle(id: string) {
+    const row = await this.prisma.newsArticle.findFirst({
+      where: { id, deletedAt: null },
+      include: articleInclude,
+    });
+    if (!row) throw new NotFoundException('Bài viết không tồn tại');
+    return this.articleView(row, false, { admin: true });
+  }
+
+  async archiveArticle(actorId: string, id: string) {
+    const row = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.newsArticle.findFirst({ where: { id, deletedAt: null }, select: { id: true, title: true, status: true } });
+      if (!current) throw new NotFoundException('Bài viết không tồn tại');
+      const archived = await tx.newsArticle.update({
+        where: { id },
+        data: { status: ArticleStatus.HIDDEN, publishedAt: null, deletedAt: new Date() },
+        include: articleInclude,
+      });
+      await tx.auditLog.create({
+        data: {
+          actorId,
+          action: 'NEWS_ARTICLE_ARCHIVED',
+          entityType: 'NewsArticle',
+          entityId: id,
+          metadata: { title: current.title, previous_status: current.status },
+        },
+      });
+      return archived;
+    });
+    return this.articleView(row, false, { admin: true });
+  }
+
   async saveArticle(id: string | undefined, dto: SaveNewsArticleDto) {
     if (dto.topic_id && !(await this.prisma.newsTopic.count({ where: { id: dto.topic_id } }))) throw new BadRequestException('Lĩnh vực không tồn tại');
     if (dto.expert_id && !(await this.prisma.newsExpert.count({ where: { id: dto.expert_id } }))) throw new BadRequestException('Chuyên gia không tồn tại');
     if (dto.content_type === NewsContentType.WAVE && !dto.video_url) throw new BadRequestException('Nội dung Sóng cần có video');
-    const current = id ? await this.prisma.newsArticle.findUnique({ where: { id } }) : undefined;
+    const current = id ? await this.prisma.newsArticle.findFirst({ where: { id, deletedAt: null } }) : undefined;
     if (id && !current) throw new NotFoundException('Bài viết không tồn tại');
     const status = dto.status ?? current?.status ?? ArticleStatus.DRAFT;
     const data = {
@@ -434,7 +467,7 @@ export class NewsService {
   }
 
   private async assertArticle(id: string) {
-    const row = await this.prisma.newsArticle.findFirst({ where: { id, status: ArticleStatus.PUBLISHED } });
+    const row = await this.prisma.newsArticle.findFirst({ where: { id, status: ArticleStatus.PUBLISHED, deletedAt: null } });
     if (!row) throw new NotFoundException('Bài viết không tồn tại');
     return row;
   }

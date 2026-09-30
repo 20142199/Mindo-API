@@ -1,4 +1,4 @@
-import { BookOpen, CheckCircle2, CircleUserRound, Clock3, ExternalLink, Eye, Heart, Newspaper, Pencil, PlaySquare, Plus, RefreshCw, Rss, Settings2, Sparkles, Tags, X } from 'lucide-react';
+import { Archive, BookOpen, CheckCircle2, CircleUserRound, Clock3, ExternalLink, Eye, Heart, Newspaper, Pencil, PlaySquare, Plus, RefreshCw, Rss, Settings2, Sparkles, Tags, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { api, type NewsArticle, type NewsExpert, type NewsSource, type NewsTopic, type SaveNewsArticle } from '../api';
 
@@ -50,6 +50,9 @@ export function NewsPage() {
   const [expertForm, setExpertForm] = useState<(typeof emptyExpert & { id?: string })>();
   const [topicForm, setTopicForm] = useState<(typeof emptyTopic & { id?: string })>();
   const [sourceForm, setSourceForm] = useState<NewsSource>();
+  const [previewArticle, setPreviewArticle] = useState<NewsArticle>();
+  const [previewingArticle, setPreviewingArticle] = useState('');
+  const [archivingArticle, setArchivingArticle] = useState('');
   const [crawlingSource, setCrawlingSource] = useState('');
   const [editorializingArticle, setEditorializingArticle] = useState('');
   const [error, setError] = useState('');
@@ -124,6 +127,29 @@ export function NewsPage() {
     finally { setEditorializingArticle(''); }
   }
 
+  async function showPreview(id: string) {
+    try {
+      setPreviewingArticle(id);
+      setPreviewArticle(await api.previewNewsArticle(id));
+      setError('');
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Không thể xem trước bài viết'); }
+    finally { setPreviewingArticle(''); }
+  }
+
+  async function archiveArticle(row: NewsArticle) {
+    if (!window.confirm(`Lưu trữ “${row.title}”? Bài sẽ biến mất khỏi ứng dụng và danh sách quản trị, nhưng dữ liệu gốc vẫn được giữ để đối soát.`)) return;
+    try {
+      setArchivingArticle(row.id);
+      await api.archiveNewsArticle(row.id);
+      setArticleForm((current) => current?.id === row.id ? undefined : current);
+      setPreviewArticle((current) => current?.id === row.id ? undefined : current);
+      setMessage('Đã lưu trữ bài viết.');
+      setError('');
+      await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Không thể lưu trữ bài viết'); }
+    finally { setArchivingArticle(''); }
+  }
+
   return <div className="page news-page">
     <div className="page-heading"><span><h1>Trung tâm tin tức</h1><p>Quản lý nội dung hiển thị tại Tường, Khám phá và Sóng trên ứng dụng Mindo.</p></span>{tab === 'sources' ? <button className="primary-button" disabled={Boolean(crawlingSource)} onClick={() => void crawlAll()}><RefreshCw size={17} className={crawlingSource === 'all' ? 'spin' : ''} /> Crawl tất cả</button> : <button className="primary-button" onClick={() => tab === 'articles' ? setArticleForm({ ...emptyArticle }) : tab === 'experts' ? setExpertForm({ ...emptyExpert }) : setTopicForm({ ...emptyTopic })}><Plus size={17} /> {tab === 'articles' ? 'Tạo nội dung' : tab === 'experts' ? 'Thêm chuyên gia' : 'Thêm lĩnh vực'}</button>}</div>
     {error ? <div className="error-banner">{error}</div> : null}
@@ -145,15 +171,34 @@ export function NewsPage() {
     {expertForm ? <ExpertForm value={expertForm} onChange={setExpertForm} onSubmit={saveExpert} onClose={() => setExpertForm(undefined)} /> : null}
     {topicForm ? <TopicForm value={topicForm} onChange={setTopicForm} onSubmit={saveTopic} onClose={() => setTopicForm(undefined)} /> : null}
     {sourceForm ? <SourceForm value={sourceForm} topics={topics} onChange={setSourceForm} onSubmit={saveSource} onClose={() => setSourceForm(undefined)} /> : null}
-    {tab === 'articles' ? <ArticleTable rows={articles} onEdit={(row) => setArticleForm(articleEditorValue(row))} /> : null}
+    {previewArticle ? <ArticlePreview article={previewArticle} onClose={() => setPreviewArticle(undefined)} /> : null}
+    {tab === 'articles' ? <ArticleTable rows={articles} previewingId={previewingArticle} archivingId={archivingArticle} onPreview={(row) => void showPreview(row.id)} onArchive={(row) => void archiveArticle(row)} onEdit={(row) => setArticleForm(articleEditorValue(row))} /> : null}
     {tab === 'experts' ? <ExpertList rows={experts} onEdit={(row) => setExpertForm({ id: row.id, name: row.name, slug: row.slug, specialty: row.specialty, bio: row.bio, avatar_url: row.avatar_url ?? '', cover_url: row.cover_url ?? '', initials: row.initials, is_verified: row.is_verified, is_active: row.is_active, sort_order: row.sort_order })} /> : null}
     {tab === 'topics' ? <TopicList rows={topics} onEdit={(row) => setTopicForm({ id: row.id, name: row.name, slug: row.slug, is_active: row.isActive, sort_order: row.sortOrder })} /> : null}
     {tab === 'sources' ? <SourceList rows={sources} crawlingSource={crawlingSource} onEdit={setSourceForm} onCrawl={(id) => void crawlSource(id)} /> : null}
   </div>;
 }
 
-function ArticleTable({ rows, onEdit }: { rows: NewsArticle[]; onEdit: (row: NewsArticle) => void }) {
-  return <section className="work-panel"><div className="table-heading"><h2>Danh sách nội dung</h2><p>Bài viết đã xuất bản sẽ hiển thị trên ứng dụng ngay lập tức.</p></div><div className="table-scroll"><table><thead><tr><th>Nội dung</th><th>Loại</th><th>Lĩnh vực</th><th>AI</th><th>Tương tác</th><th>Trạng thái</th><th /></tr></thead><tbody>{rows.map((row) => { const aiStatus = row.source_content ? row.ai_editorial_status ?? 'NOT_REQUESTED' : undefined; return <tr key={row.id}><td><span className="news-title-cell">{row.image_url ? <img src={row.image_url} alt="" /> : <span><Newspaper size={18} /></span>}<span><strong>{row.title}</strong><small>{row.summary}</small></span></span></td><td>{row.content_type === 'WAVE' ? 'Sóng' : 'Bài viết'}</td><td>{row.topic?.name ?? '—'}</td><td>{aiStatus ? <span className={`status ${aiStatus === 'READY' ? 'success' : aiStatus === 'FAILED' ? 'danger' : 'warning'}`}>{aiStatus === 'READY' ? 'Đã biên tập' : aiStatus === 'PROCESSING' ? 'Đang xử lý' : aiStatus === 'FAILED' ? 'Lỗi' : 'Chưa biên tập'}</span> : '—'}</td><td><span className="news-like"><Heart size={13} /> {row.like_count}</span></td><td><span className={`status ${row.status === 'PUBLISHED' ? 'success' : row.status === 'HIDDEN' ? 'danger' : 'warning'}`}>{row.status === 'PUBLISHED' ? 'Đã xuất bản' : row.status === 'HIDDEN' ? 'Đã ẩn' : 'Bản nháp'}</span></td><td><button className="icon-button" onClick={() => onEdit(row)}><Pencil size={16} /></button></td></tr>; })}</tbody></table></div><div className="table-footer"><span>{rows.length} nội dung</span></div></section>;
+function ArticleTable({ rows, previewingId, archivingId, onPreview, onArchive, onEdit }: { rows: NewsArticle[]; previewingId: string; archivingId: string; onPreview: (row: NewsArticle) => void; onArchive: (row: NewsArticle) => void; onEdit: (row: NewsArticle) => void }) {
+  return <section className="work-panel"><div className="table-heading"><h2>Danh sách nội dung</h2><p>Có thể xem trước cả bản nháp. Bài đã xuất bản sẽ hiển thị trên ứng dụng ngay lập tức.</p></div><div className="table-scroll"><table><thead><tr><th>Nội dung</th><th>Loại</th><th>Lĩnh vực</th><th>AI</th><th>Tương tác</th><th>Trạng thái</th><th /></tr></thead><tbody>{rows.map((row) => { const aiStatus = row.source_content ? row.ai_editorial_status ?? 'NOT_REQUESTED' : undefined; return <tr key={row.id}><td><span className="news-title-cell">{row.image_url ? <img src={row.image_url} alt="" /> : <span><Newspaper size={18} /></span>}<span><strong>{row.title}</strong><small>{row.summary}</small></span></span></td><td>{row.content_type === 'WAVE' ? 'Sóng' : 'Bài viết'}</td><td>{row.topic?.name ?? '—'}</td><td>{aiStatus ? <span className={`status ${aiStatus === 'READY' ? 'success' : aiStatus === 'FAILED' ? 'danger' : 'warning'}`}>{aiStatus === 'READY' ? 'Đã biên tập' : aiStatus === 'PROCESSING' ? 'Đang xử lý' : aiStatus === 'FAILED' ? 'Lỗi' : 'Chưa biên tập'}</span> : '—'}</td><td><span className="news-like"><Heart size={13} /> {row.like_count}</span></td><td><span className={`status ${row.status === 'PUBLISHED' ? 'success' : row.status === 'HIDDEN' ? 'danger' : 'warning'}`}>{row.status === 'PUBLISHED' ? 'Đã xuất bản' : row.status === 'HIDDEN' ? 'Đã ẩn' : 'Bản nháp'}</span></td><td><span className="article-actions"><button className="icon-button" title="Xem trước" aria-label={`Xem trước ${row.title}`} disabled={previewingId === row.id} onClick={() => onPreview(row)}>{previewingId === row.id ? <RefreshCw className="spin" size={16} /> : <Eye size={16} />}</button><button className="icon-button" title="Chỉnh sửa" aria-label={`Chỉnh sửa ${row.title}`} onClick={() => onEdit(row)}><Pencil size={16} /></button><button className="icon-button archive-button" title="Lưu trữ" aria-label={`Lưu trữ ${row.title}`} disabled={archivingId === row.id} onClick={() => onArchive(row)}>{archivingId === row.id ? <RefreshCw className="spin" size={16} /> : <Archive size={16} />}</button></span></td></tr>; })}</tbody></table></div><div className="table-footer"><span>{rows.length} nội dung</span></div></section>;
+}
+
+function ArticlePreview({ article, onClose }: { article: NewsArticle; onClose: () => void }) {
+  return <div className="news-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <section className="news-preview" role="dialog" aria-modal="true" aria-labelledby="news-preview-title">
+      <header><span><strong>Xem trước trên ứng dụng</strong><small>{article.status === 'PUBLISHED' ? 'Đã xuất bản' : article.status === 'HIDDEN' ? 'Đang ẩn' : 'Bản nháp — chưa hiển thị công khai'}</small></span><button className="icon-button" aria-label="Đóng xem trước" onClick={onClose}><X size={18} /></button></header>
+      <div className="news-preview-phone">
+        {article.image_url ? <img className="news-preview-cover" src={article.image_url} alt="" /> : <div className="news-preview-cover placeholder"><Newspaper size={32} /></div>}
+        <div className="news-preview-body">
+          <span className="news-preview-meta">{article.topic?.name ?? 'Tin Mindo'}{article.source?.name ? ` · ${article.source.name}` : ''}</span>
+          <h2 id="news-preview-title">{article.title}</h2>
+          <p className="news-preview-summary">{article.summary}</p>
+          {article.ai_summary ? <aside><Sparkles size={16} /><span><strong>Tóm tắt AI</strong><p>{article.ai_summary}</p></span></aside> : null}
+          <div className="news-preview-content">{article.content}</div>
+        </div>
+      </div>
+    </section>
+  </div>;
 }
 
 function ArticleForm({ value, topics, experts, editorializing, onEditorialize, onChange, onSubmit, onClose }: { value: ArticleEditorValue; topics: NewsTopic[]; experts: NewsExpert[]; editorializing: boolean; onEditorialize: () => void; onChange: (value: ArticleEditorValue) => void; onSubmit: (event: React.FormEvent) => void; onClose: () => void }) {

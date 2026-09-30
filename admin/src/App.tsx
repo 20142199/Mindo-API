@@ -1,6 +1,7 @@
 import { ArrowRight, Eye, EyeOff, LockKeyhole, Mail } from 'lucide-react';
-import { useState } from 'react';
-import { api, getToken, type KycRow } from './api';
+import { useEffect, useState } from 'react';
+import { api, AUTH_EXPIRED_EVENT, consumeAuthNotice, expireSession, getToken, type KycRow } from './api';
+import { isTokenExpired, tokenExpiresAt } from './auth-session';
 import { AppShell, type RouteName } from './components/AppShell';
 import { BrandMark } from './components/BrandMark';
 import { DashboardPage } from './pages/DashboardPage';
@@ -15,14 +16,65 @@ import { DepositsPage } from './pages/DepositsPage';
 import { ProductsPage } from './pages/ProductsPage';
 import { TransactionsPage } from './pages/TransactionsPage';
 import { WithdrawalsPage } from './pages/WithdrawalsPage';
+import { AnalyticsPage } from './pages/AnalyticsPage';
+import { pathForRoute, routeFromPath } from './routing';
 
 export default function App() {
-  const [route, setRoute] = useState<RouteName>('dashboard');
+  const [route, setRoute] = useState<RouteName>(() => routeFromPath(location.pathname));
   const [selectedKyc, setSelectedKyc] = useState<KycRow>();
   const demo = import.meta.env.VITE_DEMO_MODE === 'true';
-  if (!demo && !getToken()) return <Login />;
+  const [authToken, setAuthToken] = useState(() => {
+    const token = getToken();
+    if (token && isTokenExpired(token)) {
+      expireSession();
+      return null;
+    }
+    return token;
+  });
+  useEffect(() => {
+    const signOutExpiredSession = () => setAuthToken(null);
+    addEventListener(AUTH_EXPIRED_EVENT, signOutExpiredSession);
+    return () => removeEventListener(AUTH_EXPIRED_EVENT, signOutExpiredSession);
+  }, []);
+
+  useEffect(() => {
+    const initialRoute = routeFromPath(location.pathname);
+    const canonicalPath = pathForRoute(initialRoute);
+    if (location.pathname !== canonicalPath) history.replaceState({}, '', canonicalPath);
+    const syncFromBrowser = () => {
+      setSelectedKyc(undefined);
+      setRoute(routeFromPath(location.pathname));
+    };
+    addEventListener('popstate', syncFromBrowser);
+    return () => removeEventListener('popstate', syncFromBrowser);
+  }, []);
+
+  useEffect(() => {
+    if (demo || !authToken) return;
+    const expiresAt = tokenExpiresAt(authToken);
+    if (expiresAt === undefined) return;
+    const remaining = expiresAt - Date.now();
+    if (remaining <= 0) {
+      expireSession();
+      return;
+    }
+    const timer = setTimeout(() => {
+      expireSession();
+    }, remaining);
+    return () => clearTimeout(timer);
+  }, [authToken, demo]);
+
+  function navigate(nextRoute: RouteName) {
+    if (nextRoute === 'kyc') setSelectedKyc(undefined);
+    const nextPath = pathForRoute(nextRoute);
+    if (location.pathname !== nextPath) history.pushState({}, '', nextPath);
+    setRoute(nextRoute);
+  }
+
+  if (!demo && !authToken) return <Login />;
   let content: React.ReactNode;
-  if (route === 'dashboard') content = <DashboardPage onOpenKyc={(kyc) => { setSelectedKyc(kyc); setRoute('kyc'); }} onNavigate={setRoute} />;
+  if (route === 'dashboard') content = <DashboardPage onOpenKyc={(kyc) => { setSelectedKyc(kyc); history.pushState({}, '', pathForRoute('kyc')); setRoute('kyc'); }} onNavigate={navigate} />;
+  else if (route === 'analytics') content = <AnalyticsPage />;
   else if (route === 'kyc') content = selectedKyc
     ? <KycDetailPage row={selectedKyc} onBack={() => setSelectedKyc(undefined)} />
     : <KycListPage onOpen={setSelectedKyc} />;
@@ -35,13 +87,13 @@ export default function App() {
   else if (route === 'products') content = <ProductsPage />;
   else if (route === 'transactions') content = <TransactionsPage />;
   else content = <AdminAccountsPage />;
-  return <AppShell route={route} onNavigate={(nextRoute) => { if (nextRoute === 'kyc') setSelectedKyc(undefined); setRoute(nextRoute); }}>{content}</AppShell>;
+  return <AppShell route={route} onNavigate={navigate}>{content}</AppShell>;
 }
 
 function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useState(() => consumeAuthNotice());
   const [showPassword, setShowPassword] = useState(false);
   async function submit(event: React.FormEvent) {
     event.preventDefault();

@@ -6,7 +6,7 @@ import { ok } from '../common/api-response';
 import { PrismaService } from '../common/prisma.module';
 import { PushNotificationService } from '../notification/push-notification.service';
 import { ChangePasswordDto, EmailDto, LoginDto, RefreshDto, RegisterDto, ResetPasswordDto, UpdatePushTokenDto, VerifyOtpDto } from './auth.dto';
-import { authUser, AuthenticatedRequest, JwtAuthGuard } from './auth.guard';
+import { authUser, AuthenticatedRequest, JwtAuthGuard, Roles } from './auth.guard';
 import { AuthService, userView } from './auth.service';
 
 @ApiTags('Authentication')
@@ -23,6 +23,15 @@ export class AuthController {
   }
   @Post('admin/auth/login') adminLogin(@Req() req: Request, @Body() dto: LoginDto) {
     return this.auth.login(dto, [UserRole.ADMIN, UserRole.COMPLIANCE, UserRole.FINANCE], this.sessionContext(req, dto)).then((data) => ok(data));
+  }
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Roles(UserRole.ADMIN, UserRole.COMPLIANCE, UserRole.FINANCE)
+  @Post('admin/auth/update-password') adminChangePassword(@Req() req: AuthenticatedRequest, @Body() dto: ChangePasswordDto) {
+    return this.auth.changePassword(authUser(req).id, dto).then((data) => ok(data, 'Đổi mật khẩu thành công'));
+  }
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Roles(UserRole.ADMIN, UserRole.COMPLIANCE, UserRole.FINANCE)
+  @Post('admin/auth/logout') adminLogout(@Req() req: AuthenticatedRequest) {
+    const user = authUser(req);
+    return this.auth.logout(user.id, user.sid).then((data) => ok(data, 'Đã đăng xuất'));
   }
   @Post('investor/auth/register') register(@Body() dto: RegisterDto) { return this.auth.register(dto).then((data) => ok(data)); }
   @Post('investor/auth/register/otp') registerOtp(@Body() dto: EmailDto) { return this.auth.requestOtp(dto.email, 'register').then((data) => ok(data)); }

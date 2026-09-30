@@ -25,6 +25,7 @@ function setup() {
       findMany: vi.fn().mockResolvedValue([articleRow()]),
       findFirst: vi.fn().mockResolvedValue(articleRow()),
       count: vi.fn().mockResolvedValue(1),
+      update: vi.fn().mockResolvedValue(articleRow({ status: ArticleStatus.HIDDEN, deletedAt: new Date() })),
     },
     newsArticleFeedback: {
       findMany: vi.fn().mockResolvedValue([]),
@@ -49,6 +50,7 @@ function setup() {
     nftAsset: { count: vi.fn().mockResolvedValue(0) },
     user: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: 'user-1', fullName: 'Sơn', nickname: null, avatarFileId: null }) },
     newsExpertFollow: { findMany: vi.fn().mockResolvedValue([]) },
+    auditLog: { create: vi.fn().mockResolvedValue({}) },
     $executeRaw: vi.fn().mockResolvedValue(1),
     $transaction: vi.fn(),
   };
@@ -152,6 +154,28 @@ describe('NewsService — bản tóm tắt AI không lọt ra ngoài', () => {
     prisma.newsArticle.findMany.mockResolvedValue([articleRow({ source: null, sourceId: null, aiSummary: null })]);
     const { data } = await service.listArticles(listQuery(), 'user-1');
     expect(data[0]).toMatchObject({ source: null, has_ai_summary: false });
+  });
+});
+
+describe('NewsService — preview và lưu trữ mềm', () => {
+  it('admin xem trước được bản nháp', async () => {
+    const { prisma, service } = setup();
+    prisma.newsArticle.findFirst.mockResolvedValue(articleRow({ status: ArticleStatus.DRAFT }));
+
+    await expect(service.adminArticle('article-1')).resolves.toMatchObject({ id: 'article-1', status: ArticleStatus.DRAFT });
+    expect(prisma.newsArticle.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'article-1', deletedAt: null } }));
+  });
+
+  it('lưu trữ bài bằng deletedAt, ẩn khỏi app và ghi audit log', async () => {
+    const { prisma, service } = setup();
+
+    await service.archiveArticle('admin-1', 'article-1');
+
+    expect(prisma.newsArticle.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'article-1' },
+      data: expect.objectContaining({ status: ArticleStatus.HIDDEN, publishedAt: null, deletedAt: expect.any(Date) }),
+    }));
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ actorId: 'admin-1', action: 'NEWS_ARTICLE_ARCHIVED' }) }));
   });
 });
 

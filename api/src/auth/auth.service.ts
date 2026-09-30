@@ -347,7 +347,12 @@ export class AuthService {
     if (dto.new_password === dto.old_password) {
       throw new BadRequestException({ message: 'Mật khẩu mới phải khác mật khẩu hiện tại', code: 'AUTH_PASSWORD_UNCHANGED' });
     }
-    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash: await bcrypt.hash(dto.new_password, 12) } });
+    const now = new Date();
+    const passwordHash = await bcrypt.hash(dto.new_password, 12);
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: userId }, data: { passwordHash } }),
+      this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } }),
+    ]);
     return { changed: true };
   }
 

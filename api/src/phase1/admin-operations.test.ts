@@ -9,6 +9,7 @@ const serviceWith = (prisma: object) => new Phase1Service(
   {} as never,
   {} as never,
   {} as never,
+  { isConfigured: () => false } as never,
 );
 
 describe('admin operations', () => {

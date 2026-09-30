@@ -6,6 +6,21 @@ export type DashboardMetrics = {
   transactions_need_review: number;
 };
 
+export type AnalyticsReport = {
+  period: { from: string; to: string; previous_from: string; previous_to: string; granularity: 'day' | 'week' | 'month'; timezone: string };
+  summary: {
+    cash_flow: { deposits_vnd: number; withdrawals_vnd: number; net_vnd: number; deposits_count: number; withdrawals_count: number };
+    sales: { gross_revenue_vnd: number; discounts_vnd: number; net_revenue_vnd: number; orders: number; peer_sold: number; average_order_vnd: number };
+    users: { new_users: number; kyc_approved: number; transacting_users: number; total_investors: number };
+    commissions: { direct_vnd: number; branch_vnd: number; agency_vnd: number; total_vnd: number; paid_vnd: number; earned_vnd: number };
+  };
+  comparison: { deposits_vnd: number | null; withdrawals_vnd: number | null; net_revenue_vnd: number | null; peer_sold: number | null; new_users: number | null; commission_vnd: number | null };
+  timeseries: Array<{ bucket: string; deposits_vnd: number; withdrawals_vnd: number; revenue_vnd: number; commissions_vnd: number; new_users: number; peer_sold: number }>;
+  agency_titles: Array<{ title: string; orders: number; peer_sold: number; revenue_vnd: number }>;
+  top_agencies: Array<{ id: string; code: string; name: string; owner: string; orders: number; peer_sold: number; revenue_vnd: number }>;
+  alerts: Array<{ key: string; level: 'critical' | 'warning' | 'ok'; label: string; count: number; amount_vnd: number }>;
+};
+
 export type KycRow = {
   id: string;
   fullName: string;
@@ -85,6 +100,14 @@ export type WithdrawalRow = {
   updatedAt: string;
   transferProof?: { id: string; name: string; mime_type: string; size: number; url: string; public_url: string } | null;
   user: { id: string; email: string; fullName: string; phone?: string; balanceVnd: string };
+  reviewedBy?: { id: string; email: string; fullName: string; role: string } | null;
+  history?: Array<{
+    id: string;
+    action: 'WITHDRAWAL_CREATED' | 'WITHDRAWAL_APPROVED' | 'WITHDRAWAL_REJECTED_REFUNDED' | string;
+    metadata?: Record<string, unknown> | null;
+    createdAt: string;
+    actor?: { id: string; email: string; fullName: string; role: string } | null;
+  }>;
 };
 
 export type TransactionRow = {
@@ -392,6 +415,33 @@ export const demoData = {
   ] satisfies TransactionRow[],
 };
 
+const demoAnalytics: AnalyticsReport = {
+  period: { from: '2026-09-01', to: '2026-09-30', previous_from: '2026-08-01T17:00:00.000Z', previous_to: '2026-08-31T17:00:00.000Z', granularity: 'day', timezone: 'Asia/Ho_Chi_Minh' },
+  summary: {
+    cash_flow: { deposits_vnd: 4250000000, withdrawals_vnd: 1180000000, net_vnd: 3070000000, deposits_count: 186, withdrawals_count: 63 },
+    sales: { gross_revenue_vnd: 3125000000, discounts_vnd: 625000000, net_revenue_vnd: 2500000000, orders: 238, peer_sold: 5000, average_order_vnd: 10504202 },
+    users: { new_users: 326, kyc_approved: 248, transacting_users: 214, total_investors: 4281 },
+    commissions: { direct_vnd: 183000000, branch_vnd: 87500000, agency_vnd: 126000000, total_vnd: 396500000, paid_vnd: 301000000, earned_vnd: 95500000 },
+  },
+  comparison: { deposits_vnd: 18.4, withdrawals_vnd: -6.2, net_revenue_vnd: 12.8, peer_sold: 12.8, new_users: 9.6, commission_vnd: 14.3 },
+  timeseries: Array.from({ length: 10 }, (_, index) => ({ bucket: `2026-09-${String(index * 3 + 1).padStart(2, '0')}`, deposits_vnd: 250000000 + index * 31000000, withdrawals_vnd: 60000000 + (index % 4) * 18000000, revenue_vnd: 140000000 + index * 22000000, commissions_vnd: 18000000 + index * 3500000, new_users: 18 + index * 3, peer_sold: 280 + index * 35 })),
+  agency_titles: [
+    { title: 'TIER_3', orders: 42, peer_sold: 2300, revenue_vnd: 1020000000 },
+    { title: 'TIER_2', orders: 86, peer_sold: 1700, revenue_vnd: 835000000 },
+    { title: 'TIER_1', orders: 110, peer_sold: 1000, revenue_vnd: 645000000 },
+  ],
+  top_agencies: [
+    { id: 'a1', code: 'DL000128', name: 'Lộc Store', owner: 'Nguyễn Văn Lộc', orders: 38, peer_sold: 620, revenue_vnd: 320000000 },
+    { id: 'a2', code: 'DL000127', name: 'Mai Mindo', owner: 'Trần Thị Mai', orders: 31, peer_sold: 570, revenue_vnd: 285000000 },
+  ],
+  alerts: [
+    { key: 'stale_withdrawals', level: 'critical', label: 'Lệnh rút chờ quá 24 giờ', count: 2, amount_vnd: 17500000 },
+    { key: 'expired_deposits', level: 'warning', label: 'QR nạp đã hết hạn chưa khớp', count: 5, amount_vnd: 76000000 },
+    { key: 'stale_deposits', level: 'warning', label: 'Lệnh nạp chờ quá 30 phút', count: 8, amount_vnd: 124000000 },
+    { key: 'failed_orders', level: 'ok', label: 'Đơn mua lỗi trong kỳ', count: 0, amount_vnd: 0 },
+  ],
+};
+
 const demoProducts: NftProduct[] = [{
   id: 'peer-1', name: 'Mindo Genesis', symbol: 'PEER', description: 'Gói quyền sở hữu nội bộ Mindo.',
   imageUrl: 'https://images.unsplash.com/photo-1639762681485-074b7f938ba0?auto=format&fit=crop&w=500&q=80',
@@ -399,14 +449,38 @@ const demoProducts: NftProduct[] = [{
   soldCount: 1256, isActive: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
 }];
 
-export function getToken() { return sessionStorage.getItem('mindo_admin_token'); }
-export function clearToken() { sessionStorage.removeItem('mindo_admin_token'); }
+const TOKEN_KEY = 'mindo_admin_token';
+const AUTH_NOTICE_KEY = 'mindo_admin_auth_notice';
+const EXPIRED_MESSAGE = 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.';
+export const AUTH_EXPIRED_EVENT = 'mindo:auth-expired';
+let authExpiryHandled = false;
+
+export function getToken() { return sessionStorage.getItem(TOKEN_KEY); }
+export function clearToken() { sessionStorage.removeItem(TOKEN_KEY); }
+export function expireSession() {
+  clearToken();
+  sessionStorage.setItem(AUTH_NOTICE_KEY, EXPIRED_MESSAGE);
+  dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+}
+export function consumeAuthNotice() {
+  const notice = sessionStorage.getItem(AUTH_NOTICE_KEY) ?? '';
+  sessionStorage.removeItem(AUTH_NOTICE_KEY);
+  return notice;
+}
+
+function handleUnauthorized(response: Response, token: string | null) {
+  if (response.status !== 401 || !token || authExpiryHandled) return;
+  authExpiryHandled = true;
+  expireSession();
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getToken();
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}), ...init?.headers },
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...init?.headers },
   });
+  handleUnauthorized(response, token);
   const body = (await response.json()) as ApiEnvelope<T>;
   if (!response.ok) throw new Error(body.message || 'Không thể kết nối máy chủ');
   return body.data;
@@ -415,13 +489,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   async login(email: string, password: string) {
     const data = await request<{ access_token: string }>('/api/v1/admin/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
-    sessionStorage.setItem('mindo_admin_token', data.access_token);
+    sessionStorage.setItem(TOKEN_KEY, data.access_token);
+    authExpiryHandled = false;
   },
+  logout: () => request<{ revoked: boolean }>('/api/v1/admin/auth/logout', { method: 'POST' }),
+  changePassword: (oldPassword: string, newPassword: string, confirmPassword: string) => request<{ changed: boolean }>('/api/v1/admin/auth/update-password', {
+    method: 'POST',
+    body: JSON.stringify({ old_password: oldPassword, new_password: newPassword, confirm_password: confirmPassword }),
+  }),
   dashboard: () => demoMode ? Promise.resolve(demoData.metrics) : request<DashboardMetrics>('/api/v1/admin/dashboard'),
+  analytics: (from: string, to: string, granularity: 'day' | 'week' | 'month') => demoMode
+    ? Promise.resolve({ ...demoAnalytics, period: { ...demoAnalytics.period, from, to, granularity } })
+    : request<AnalyticsReport>(`/api/v1/admin/analytics?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&granularity=${granularity}`),
   users: () => demoMode ? Promise.resolve([{ id: 'u-demo', email: 'minhanh.nguyen95@gmail.com', full_name: 'Nguyễn Minh Anh', nickname: 'Minh Anh', referral_code: 'MDMINHANH', referred_by_id: '', phone: '0987 654 321', role: 'investor', status: 'active', kyc_status: 'none', balance_vnd: '25000000', agency_title: 'TIER_1', total_packages_purchased: 12, created_at: new Date('2026-09-01').getTime() }] satisfies InvestorRow[]) : request<InvestorRow[]>('/api/v1/admin/users'),
   kyc: () => demoMode ? Promise.resolve(demoData.kyc) : request<KycRow[]>('/api/v1/admin/kyc'),
   deposits: () => demoMode ? Promise.resolve(demoData.deposits) : request<DepositRow[]>('/api/v1/admin/deposits'),
   withdrawals: () => demoMode ? Promise.resolve(demoData.withdrawals) : request<WithdrawalRow[]>('/api/v1/admin/withdrawals'),
+  withdrawalDetail: (id: string) => demoMode
+    ? Promise.resolve(demoData.withdrawals.find((row) => row.id === id)!)
+    : request<WithdrawalRow>(`/api/v1/admin/withdrawals/${id}`),
   async uploadWithdrawalProof(file: File) {
     if (demoMode) {
       const previewUrl = URL.createObjectURL(file);
@@ -429,7 +515,9 @@ export const api = {
     }
     const form = new FormData();
     form.append('file', file);
-    const response = await fetch(`${API_URL}/api/v1/admin/withdrawals/proof/upload`, { method: 'POST', headers: { Authorization: `Bearer ${getToken()}` }, body: form });
+    const token = getToken();
+    const response = await fetch(`${API_URL}/api/v1/admin/withdrawals/proof/upload`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
+    handleUnauthorized(response, token);
     const body = (await response.json()) as ApiEnvelope<{ id: string; name: string; mime_type: string; size: number; url: string; public_url: string }>;
     if (!response.ok) throw new Error(body.message || 'Không thể tải ảnh chuyển khoản');
     return body.data;
@@ -471,7 +559,9 @@ export const api = {
     : request(`/api/v1/admin/agencies/${id}/review`, { method: 'POST', body: JSON.stringify({ status, review_note: note, rejection_reason: status === 'REJECTED' ? note : undefined }) }),
   async downloadAgencyContract(id: string) {
     if (demoMode) return;
-    const response = await fetch(`${API_URL}/api/v1/admin/agencies/${id}/contract`, { headers: { Authorization: `Bearer ${getToken()}` } });
+    const token = getToken();
+    const response = await fetch(`${API_URL}/api/v1/admin/agencies/${id}/contract`, { headers: { Authorization: `Bearer ${token}` } });
+    handleUnauthorized(response, token);
     if (!response.ok) throw new Error('Không thể tải hợp đồng');
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
@@ -506,6 +596,12 @@ export const api = {
   createSystemReferralCode: (label: string) => demoMode ? Promise.resolve({ id: `demo-${Date.now()}`, code: `MD${Date.now().toString(36).toUpperCase()}`, label, isActive: true, createdAt: new Date().toISOString(), downline_count: 0, downline_sales_vnd: '0', branch_commission_vnd: '0', createdBy: { fullName: 'Admin', email: 'admin@mindo.local' } } satisfies SystemReferralCodeRow) : request<SystemReferralCodeRow>('/api/v1/admin/referrals/system-codes', { method: 'POST', body: JSON.stringify({ label: label || undefined }) }),
   setSystemReferralCodeActive: (id: string, isActive: boolean) => demoMode ? Promise.resolve({ id, isActive }) : request(`/api/v1/admin/referrals/system-codes/${id}`, { method: 'PATCH', body: JSON.stringify({ is_active: isActive }) }),
   newsArticles: () => demoMode ? Promise.resolve(demoNewsArticles) : request<NewsArticle[]>('/api/v1/admin/news/articles?limit=50'),
+  previewNewsArticle: (id: string) => demoMode
+    ? Promise.resolve(demoNewsArticles.find((row) => row.id === id)!)
+    : request<NewsArticle>(`/api/v1/admin/news/articles/${id}/preview`),
+  archiveNewsArticle: (id: string) => demoMode
+    ? Promise.resolve(demoNewsArticles.find((row) => row.id === id)!)
+    : request<NewsArticle>(`/api/v1/admin/news/articles/${id}`, { method: 'DELETE' }),
   saveNewsArticle: (article: SaveNewsArticle & { id?: string }) => {
     if (demoMode) return Promise.resolve({ ...demoNewsArticles[0], ...article, id: article.id ?? `demo-${Date.now()}` });
     const payload = {

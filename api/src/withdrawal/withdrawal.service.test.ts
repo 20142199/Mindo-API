@@ -11,8 +11,8 @@ const withdrawal = (status = WithdrawalStatus.PENDING) => ({
   bankTransactionCode: null, refundedAt: null, createdAt: new Date(), updatedAt: new Date(),
 });
 
-const serviceWith = (prisma: object, files: object = {}, push: object = {}) => new WithdrawalService(
-  prisma as never, files as never, push as never,
+const serviceWith = (prisma: object, files: object = {}, push: object = {}, telegram: object = { isConfigured: () => false }) => new WithdrawalService(
+  prisma as never, files as never, push as never, telegram as never,
 );
 
 describe('withdrawal money safety', () => {

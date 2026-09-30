@@ -134,9 +134,9 @@ export class NewsCrawlService {
   async prepareEditorial(id: string, force = false) {
     const article = await this.prisma.newsArticle.findUnique({
       where: { id },
-      select: { id: true, sourceContent: true, aiEditorialStatus: true },
+      select: { id: true, sourceContent: true, aiEditorialStatus: true, deletedAt: true },
     });
-    if (!article) throw new NotFoundException('Bài viết không tồn tại');
+    if (!article || article.deletedAt) throw new NotFoundException('Bài viết không tồn tại');
     if (!article.sourceContent?.trim()) throw new BadRequestException('Bài viết chưa có nội dung gốc để AI biên tập');
     if (!this.aiSummary.isConfigured()) throw new ServiceUnavailableException(this.aiSummary.configurationError());
     if (article.aiEditorialStatus === NewsEditorialStatus.PROCESSING) throw new ConflictException('Bài viết đang được AI xử lý');
@@ -144,7 +144,7 @@ export class NewsCrawlService {
       throw new BadRequestException('Bản tiếng Việt đã tồn tại; cần xác nhận biên tập lại');
     }
     const claimed = await this.prisma.newsArticle.updateMany({
-      where: { id, aiEditorialStatus: { not: NewsEditorialStatus.PROCESSING } },
+      where: { id, deletedAt: null, aiEditorialStatus: { not: NewsEditorialStatus.PROCESSING } },
       data: { aiEditorialStatus: NewsEditorialStatus.PROCESSING, aiEditorialError: null },
     });
     if (!claimed.count) throw new ConflictException('Bài viết đang được AI xử lý');
@@ -161,9 +161,9 @@ export class NewsCrawlService {
   async editorializeArticleById(id: string) {
     const article = await this.prisma.newsArticle.findUnique({
       where: { id },
-      select: { id: true, sourceTitle: true, sourceContent: true, externalKey: true, topicId: true },
+      select: { id: true, sourceTitle: true, sourceContent: true, externalKey: true, topicId: true, deletedAt: true },
     });
-    if (!article) throw new NotFoundException('Bài viết không tồn tại');
+    if (!article || article.deletedAt) throw new NotFoundException('Bài viết không tồn tại');
     if (!article.sourceContent?.trim()) throw new BadRequestException('Bài viết chưa có nội dung gốc để AI biên tập');
     try {
       const topics = await this.prisma.newsTopic.findMany({ where: { isActive: true }, select: { id: true, slug: true, name: true }, orderBy: { sortOrder: 'asc' } });

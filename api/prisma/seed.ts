@@ -1,5 +1,6 @@
 import { AgencyStatus, ArticleStatus, PrismaClient, ReviewStatus, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { seedMindoGenesisProduct } from './product-seed';
 
 const prisma = new PrismaClient();
 
@@ -46,19 +47,7 @@ async function main() {
     });
   }
 
-  if ((await prisma.nftProduct.count()) === 0) {
-    await prisma.nftProduct.create({
-      data: {
-        name: 'Mindo Genesis',
-        symbol: 'MINDO',
-        description: 'NFT nội bộ Mindo được quản lý trực tiếp trên hệ thống',
-        imageUrl: 'https://placehold.co/800x800/053c35/ffffff?text=Mindo+Genesis',
-        metadataBaseUrl: 'https://metadata.example.test/mindo',
-        unitPriceVnd: '3200000',
-        totalSupply: 10000,
-      },
-    });
-  }
+  const product = await seedMindoGenesisProduct(prisma);
 
   const agentUser = await prisma.user.upsert({
     where: { email: 'agent@local.test' },
@@ -113,8 +102,7 @@ async function main() {
       snapshot: { agencyCode: agency.code, businessName: agency.businessName, representative: agentUser.fullName, email: agentUser.email, phone: agency.phone, address: agency.address, taxCode: agency.taxCode },
     },
   });
-  const product = await prisma.nftProduct.findFirst({ orderBy: { createdAt: 'asc' } });
-  if (product && (await prisma.agencyPackagePurchase.count({ where: { agencyId: agency.id } })) === 0) {
+  if ((await prisma.agencyPackagePurchase.count({ where: { agencyId: agency.id } })) === 0) {
     await prisma.agencyPackagePurchase.create({
       data: {
         agencyId: agency.id,
