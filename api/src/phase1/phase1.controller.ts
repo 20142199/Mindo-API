@@ -61,6 +61,11 @@ export class Phase1Controller {
     return this.service.createDeposit(authUser(req).id, dto, key || randomUUID()).then((data) => ok(data, 'Đã tạo lệnh nạp'));
   }
 
+  @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Post('investor/deposits/:id/cancel')
+  cancelDeposit(@Req() req: AuthedRequest, @Param('id') id: string) {
+    return this.service.cancelDeposit(authUser(req).id, id).then((data) => ok(data, 'Đã huỷ lệnh nạp'));
+  }
+
   @ApiBearerAuth() @UseGuards(JwtAuthGuard) @Get('investor/deposits')
   myDeposits(@Req() req: AuthedRequest) { return this.service.listDeposits(authUser(req).id).then((data) => ok(data)); }
 

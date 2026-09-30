@@ -30,6 +30,7 @@ enum DepositStatus {
   PENDING
   CONFIRMED
   REJECTED
+  CANCELLED
 }
 
 enum WithdrawalStatus {
