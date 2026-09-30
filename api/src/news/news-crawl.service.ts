@@ -4,7 +4,7 @@ import { ArticleStatus, NewsContentType, NewsCrawlStatus, NewsEditorialStatus } 
 import { PrismaService } from '../common/prisma.module';
 import { parseArticleHtml, parseListingHtml } from './html-news.parser';
 import { NewsAiSummaryService } from './news-ai-summary.service';
-import { sourceDefinition } from './news-source.definitions';
+import { sourceClassification, sourceDefinition } from './news-source.definitions';
 import { UpdateNewsSourceDto } from './news.dto';
 
 const USER_AGENT = 'MindoNewsBot/1.0 (+https://mindo.vn/news-source)';
@@ -23,8 +23,8 @@ export class NewsCrawlService {
     private readonly aiSummary: NewsAiSummaryService,
   ) {}
 
-  listSources() {
-    return this.prisma.newsSource.findMany({
+  async listSources() {
+    const rows = await this.prisma.newsSource.findMany({
       include: {
         topic: true,
         _count: { select: { articles: true, crawlRuns: true } },
@@ -32,12 +32,13 @@ export class NewsCrawlService {
       },
       orderBy: { name: 'asc' },
     });
+    return rows.map((row) => ({ ...row, ...sourceClassification(row.key) }));
   }
 
   async updateSource(id: string, dto: UpdateNewsSourceDto) {
     await this.assertSource(id);
     if (dto.topic_id && !(await this.prisma.newsTopic.count({ where: { id: dto.topic_id } }))) throw new NotFoundException('Lĩnh vực không tồn tại');
-    return this.prisma.newsSource.update({
+    const source = await this.prisma.newsSource.update({
       where: { id },
       data: {
         isActive: dto.is_active,
@@ -47,6 +48,7 @@ export class NewsCrawlService {
       },
       include: { topic: true, _count: { select: { articles: true, crawlRuns: true } }, crawlRuns: { orderBy: { startedAt: 'desc' }, take: 5 } },
     });
+    return { ...source, ...sourceClassification(source.key) };
   }
 
   async crawlDueSources() {
