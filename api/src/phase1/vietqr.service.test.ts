@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JwtService } from '@nestjs/jwt';
 import { buildVietQrQuickLink, generateNumericOrderId, VietQrService } from './vietqr.service';
 
 const originalEnv = { ...process.env };
 
 afterEach(() => {
+  vi.restoreAllMocks();
   process.env = { ...originalEnv };
 });
 
@@ -33,7 +34,35 @@ describe('VietQrService', () => {
   });
 
   it('creates a 14-digit provider order id', () => {
-    expect(generateNumericOrderId(1_700_000_000_000, 42)).toBe('17000000000042');
+    expect(generateNumericOrderId(1_700_000_000_000, 42)).toBe('1700000000042');
+    expect(generateNumericOrderId(1_700_000_000_000, 1_042)).toBe('1700000000042');
+  });
+
+  it('asks VietQR to reconcile API-generated QR transactions', async () => {
+    Object.assign(process.env, {
+      VIETQR_MODE: 'api',
+      VIETQR_BASE_URL: 'https://dev.vietqr.org',
+      VIETQR_USERNAME: 'uat-user',
+      VIETQR_PASSWORD: 'uat-password',
+      VIETQR_ALLOW_QUICKLINK_FALLBACK: 'false',
+      VIETQR_BANK_CODE: 'MB',
+      VIETQR_BANK_NAME: 'MBBank',
+      VIETQR_BANK_ACCOUNT: '0387002727',
+      VIETQR_ACCOUNT_NAME: 'NGUYEN THI BANG SUONG',
+    });
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'uat-token', token_type: 'Bearer', expires_in: 300 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        qrCode: '000201010212...', orderId: '17909239139644', existing: 0,
+      }), { status: 200 }));
+
+    await service().generate(10_000, 'MINDOUAT01', '17909239139644');
+
+    const request = fetchMock.mock.calls[1][1];
+    expect(JSON.parse(String(request?.body))).toMatchObject({
+      bankCode: 'MB', bankAccount: '0387002727', amount: 10_000,
+      orderId: '17909239139644', transType: 'C', reconciliation: true,
+    });
   });
 
   it('issues and validates the Bearer token used by VietQR callbacks', async () => {

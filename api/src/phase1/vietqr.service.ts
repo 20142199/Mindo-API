@@ -17,8 +17,8 @@ export type VietQrResult = {
 
 type VietQrToken = { accessToken: string; tokenType: string; expiresAt: number };
 
-export function generateNumericOrderId(now = Date.now(), suffix = randomInt(0, 10_000)) {
-  return `${Math.floor(now / 1000)}${suffix.toString().padStart(4, '0')}`;
+export function generateNumericOrderId(now = Date.now(), suffix = randomInt(0, 1_000)) {
+  return `${Math.floor(now / 1000)}${Math.abs(suffix % 1_000).toString().padStart(3, '0')}`;
 }
 
 export function buildVietQrQuickLink(bankId: string, account: string, amount: number, content: string, accountName: string) {
@@ -157,6 +157,7 @@ export class VietQrService {
         amount: Math.round(input.amount),
         orderId: input.orderId,
         transType: 'C',
+        reconciliation: true,
       }),
       signal: AbortSignal.timeout(Number(process.env.VIETQR_TIMEOUT_MS ?? 10_000)),
     });
