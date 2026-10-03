@@ -1,6 +1,7 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../common/prisma.module';
+import { ChatRealtimeService } from '../chat/chat-realtime.service';
 import { FileStorageService } from '../phase1/file-storage.service';
 import { FriendService } from './friend.service';
 import { FriendListQueryDto } from './friend.dto';
@@ -21,6 +22,8 @@ import { FriendListQueryDto } from './friend.dto';
  *      một ô vỡ, và không có gì nói vì sao.
  */
 
+const realtime = { publishFriendChanged: vi.fn() } as unknown as ChatRealtimeService;
+
 function serviceWith(
   prisma: Partial<PrismaService>,
   files: Partial<FileStorageService> = {},
@@ -28,6 +31,7 @@ function serviceWith(
   return new FriendService(
     prisma as PrismaService,
     { view: () => ({ public_url: null }), ...files } as unknown as FileStorageService,
+    realtime,
   );
 }
 
@@ -132,7 +136,7 @@ describe('ảnh riêng trong danh sách bạn bè', () => {
 
     const service = new FriendService(prisma, {
       view: (file: { id: string }) => ({ public_url: `https://cdn/${file.id}` }),
-    } as unknown as FileStorageService);
+    } as unknown as FileStorageService, realtime);
 
     return { service, prisma };
   }

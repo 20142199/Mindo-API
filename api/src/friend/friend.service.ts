@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { FileUpload, Prisma, User, UserRole, UserStatus } from "@prisma/client";
@@ -20,6 +21,10 @@ import {
   FriendRequestQueryDto,
 } from "./friend.dto";
 import { searchKey } from "../chat/chat.domain";
+import {
+  ChatRealtimeService,
+  FriendChangeAction,
+} from "../chat/chat-realtime.service";
 
 type FriendProfile = Pick<
   User,
@@ -28,9 +33,12 @@ type FriendProfile = Pick<
 
 @Injectable()
 export class FriendService {
+  private readonly logger = new Logger(FriendService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly files: FileStorageService,
+    private readonly realtime: ChatRealtimeService,
   ) {}
 
   async sendRequest(requesterId: string, identifier: string) {
@@ -88,6 +96,7 @@ export class FriendService {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+    this.notify("request_sent", requesterId, recipient.id);
 
     return {
       direction: FriendRequestDirection.OUTGOING,
@@ -224,6 +233,7 @@ export class FriendService {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+    this.notify("request_accepted", recipientId, requesterId);
     return { friend: await this.profile(friend, true) };
   }
 
@@ -233,6 +243,7 @@ export class FriendService {
     });
     if (result.count !== 1)
       throw new NotFoundException("Không tìm thấy lời mời kết bạn");
+    this.notify("request_rejected", recipientId, requesterId);
     return { rejected: true, user_id: requesterId };
   }
 
@@ -242,6 +253,7 @@ export class FriendService {
     });
     if (result.count !== 1)
       throw new NotFoundException("Không tìm thấy lời mời kết bạn đã gửi");
+    this.notify("request_cancelled", requesterId, recipientId);
     return { cancelled: true, user_id: recipientId };
   }
 
@@ -333,7 +345,25 @@ export class FriendService {
     );
     if (deleted.count === 0)
       throw new NotFoundException("Hai tài khoản chưa phải bạn bè");
+    this.notify("friend_removed", userId, friendUserId);
     return { removed: true, user_id: friendUserId };
+  }
+
+  /**
+   * Báo `friend:updated` cho cả hai người. Chỉ gọi khi CSDL đã ghi xong.
+   *
+   * Nuốt lỗi: thao tác đã commit rồi, socket hỏng mà trả 500 thì app tưởng
+   * thất bại và bấm lại — trong khi dữ liệu đã đổi. Mất sự kiện thì app vẫn
+   * tự tải lại khi kéo làm mới hoặc khi quay lại foreground.
+   */
+  private notify(action: FriendChangeAction, actorId: string, targetId: string) {
+    try {
+      this.realtime.publishFriendChanged(action, actorId, targetId);
+    } catch (error) {
+      this.logger.warn(
+        `Không phát được friend:updated (${action}): ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   private async findUserByIdentifier(identifier: string) {

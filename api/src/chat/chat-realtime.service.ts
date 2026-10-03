@@ -14,6 +14,14 @@ import { ChatService } from './chat.service';
 type ChatSocketData = { userId: string; role: UserRole };
 type Ack = (payload: Record<string, unknown>) => void;
 
+/* Thao tác kết bạn đã ghi xong — xem `publishFriendChanged`. */
+export type FriendChangeAction =
+  | 'request_sent'
+  | 'request_accepted'
+  | 'request_rejected'
+  | 'request_cancelled'
+  | 'friend_removed';
+
 @Injectable()
 export class ChatRealtimeService implements OnModuleDestroy {
   private readonly logger = new Logger(ChatRealtimeService.name);
@@ -167,6 +175,26 @@ export class ChatRealtimeService implements OnModuleDestroy {
     this.namespace?.to(this.userRoom(userId)).emit('conversation:removed', {
       conversation_id: conversationId,
       reason,
+    });
+  }
+
+  /**
+   * Báo cho CẢ HAI người rằng quan hệ bạn bè giữa họ vừa đổi. Phòng của người
+   * bấm cũng nhận, để các máy khác của chính họ cập nhật theo.
+   *
+   * Chỉ gọi SAU khi giao dịch đã commit: phát trước mà giao dịch rollback thì
+   * client đã nhận một sự kiện sai. Gói tin chỉ là tín hiệu để app tải lại
+   * danh sách bạn và lời mời, không mang dữ liệu hồ sơ.
+   *
+   * Một lần `emit` vào hai phòng: socket.io tự gộp, máy nào ở cả hai phòng
+   * (tự kết bạn với mình — vốn bị chặn) cũng chỉ nhận một gói.
+   */
+  publishFriendChanged(action: FriendChangeAction, actorId: string, targetId: string) {
+    this.namespace?.to([this.userRoom(actorId), this.userRoom(targetId)]).emit('friend:updated', {
+      action,
+      actor_user_id: actorId,
+      target_user_id: targetId,
+      at: new Date().toISOString(),
     });
   }
 
