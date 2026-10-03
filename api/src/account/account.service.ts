@@ -31,6 +31,18 @@ export class AccountService {
       ? await this.prisma.fileUpload.findUnique({ where: { id: user.avatarFileId } })
       : null;
     const kyc = user.kycSubmissions[0];
+    /* Đã duyệt thì `submitted_at` phải là lúc nộp hồ sơ ĐƯỢC DUYỆT, không phải
+       hồ sơ nộp lại sau đó (đang chờ / bị từ chối) — nếu không app sẽ hiện
+       "duyệt" trước "nộp". Hồ sơ mới nhất thường chính là hồ sơ được duyệt nên
+       chỉ truy vấn thêm khi nó không phải. */
+    const approvedKyc = !user.kycVerifiedAt
+      ? null
+      : kyc?.status === 'APPROVED'
+        ? kyc
+        : await this.prisma.kycSubmission.findFirst({
+            where: { userId, status: 'APPROVED' },
+            orderBy: { createdAt: 'desc' },
+          });
     return {
       uid: user.id,
       email: user.email,
@@ -49,12 +61,24 @@ export class AccountService {
         account_number: user.bankAccountNumber ?? '',
         bank_name: user.bankName ?? '',
       },
-      kyc: {
-        status: kyc?.status.toLowerCase() ?? 'none',
-        rejection_reason: kyc?.rejectionReason ?? null,
-        submitted_at: kyc?.createdAt.getTime() ?? null,
-        reviewed_at: kyc?.reviewedAt?.getTime() ?? null,
-      },
+      /* `kycVerifiedAt` là nguồn sự thật: cổng mua NFT/Peer (phase1.service) và
+         đại lý (agency.service) đều xét cột này, `/investor/me` (userView) cũng
+         vậy. Có nó thì 'approved' — kể cả khi không có hồ sơ nào (seed, set tay)
+         hay hồ sơ nộp lại sau khi đã duyệt đang chờ / bị từ chối. Không có thì
+         mới rơi về hồ sơ mới nhất. */
+      kyc: user.kycVerifiedAt
+        ? {
+            status: 'approved',
+            rejection_reason: null,
+            submitted_at: approvedKyc?.createdAt.getTime() ?? null,
+            reviewed_at: user.kycVerifiedAt.getTime(),
+          }
+        : {
+            status: kyc?.status.toLowerCase() ?? 'none',
+            rejection_reason: kyc?.rejectionReason ?? null,
+            submitted_at: kyc?.createdAt.getTime() ?? null,
+            reviewed_at: kyc?.reviewedAt?.getTime() ?? null,
+          },
       onboarding: {
         profile_completed: Boolean(user.phone && user.address),
         kyc_completed: Boolean(user.kycVerifiedAt),

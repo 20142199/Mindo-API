@@ -119,6 +119,7 @@ function buildService(row = conversationRow()) {
   const prisma = {
     conversationMember: {
       findFirst: () => Promise.resolve(row.members[0]),
+      findMany: () => Promise.resolve([]),
       createMany: () => Promise.resolve({ count: 1 }),
       updateMany: () => Promise.resolve({ count: 1 }),
     },
@@ -132,7 +133,7 @@ function buildService(row = conversationRow()) {
       create: () => Promise.resolve(systemRow),
     },
     friendship: { count: () => Promise.resolve(1) },
-    user: { findUnique: () => Promise.resolve(me) },
+    user: { findUnique: () => Promise.resolve(me), findMany: () => Promise.resolve([]) },
     fileUpload: { findMany: () => Promise.resolve([]) },
     savedChatMessage: { findMany: () => Promise.resolve([]) },
   } as unknown as PrismaService;
@@ -240,8 +241,8 @@ describe('a system message has to reach the socket layer', () => {
       member_user_ids: ['user-new'],
     });
 
-    expect(result.system_message.sender).toBeNull();
-    expect(result.system_message.is_own).toBe(false);
+    expect(result.system_message?.sender).toBeNull();
+    expect(result.system_message?.is_own).toBe(false);
   });
 
   it('still returns the conversation itself', async () => {

@@ -1,6 +1,7 @@
 import { NotFoundException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { PrismaService } from '../common/prisma.module';
+import { ChatRealtimeService } from '../chat/chat-realtime.service';
 import { FileStorageService } from '../phase1/file-storage.service';
 import { FriendService } from './friend.service';
 import { FriendListQueryDto } from './friend.dto';
@@ -15,9 +16,10 @@ import { FriendListQueryDto } from './friend.dto';
  */
 
 const files = { view: () => ({ public_url: null }) } as unknown as FileStorageService;
+const realtime = { publishFriendChanged: vi.fn() } as unknown as ChatRealtimeService;
 
 function serviceWith(prisma: Partial<PrismaService>) {
-  return new FriendService(prisma as PrismaService, files);
+  return new FriendService(prisma as PrismaService, files, realtime);
 }
 
 describe('đặt tên gợi nhớ', () => {

@@ -48,6 +48,43 @@ export function messagePreview(type: ChatMessageType, content?: string | null) {
   return value.length > 80 ? `${value.slice(0, 77)}...` : value;
 }
 
+/**
+ * Dòng chữ trong ô trích dẫn của một tin trả lời.
+ *
+ * Một chỗ giữ vì có hai nơi dựng: lúc GỬI (`buildQuotedSnapshot` chụp lại) và
+ * lúc ĐỌC (`serializeMessages` lấy nội dung sống của tin gốc). Lệch nhau một
+ * ký tự là tin gốc chưa hề sửa mà ô trích dẫn vẫn đổi chữ so với bản chụp.
+ */
+export function quotePreview(type: ChatMessageType, content?: string | null) {
+  return messagePreview(type, content).slice(0, 200);
+}
+
+/**
+ * Dữ liệu có cấu trúc của tin hệ thống NHÓM — cột `ChatMessage.systemInfo`,
+ * ra ngoài là `system_info`.
+ *
+ * `content` là câu dựng sẵn ở server, theo góc nhìn của không ai cả: người tạo
+ * nhóm đọc thấy tên chính mình thay vì "Bạn", tên gợi nhớ không bao giờ hiện.
+ * Server không dựng câu riêng được vì `message:new` phát MỘT payload cho cả
+ * phòng, nên gửi kèm ai làm / làm gì / với ai để app tự dựng.
+ *
+ * `actor_name` / `target_names` là tên CHỤP lúc xảy ra: người đã rời nhóm và
+ * không phải bạn bè thì app không còn chỗ nào tra ra tên nữa.
+ */
+export type GroupSystemEvent = 'GROUP_CREATED' | 'GROUP_UPDATED' | 'MEMBERS_ADDED' | 'MEMBER_REMOVED' | 'MEMBER_LEFT';
+
+export interface GroupSystemInfo {
+  event: GroupSystemEvent;
+  actor_user_id: string;
+  actor_name: string;
+  target_user_ids?: string[];
+  target_names?: string[];
+  /** Chỉ `GROUP_UPDATED`: tên mới, `null` khi lần đó tên không đổi */
+  new_title?: string | null;
+  /** Chỉ `GROUP_UPDATED`: `null` khi lần đó ảnh không đổi */
+  avatar?: 'CHANGED' | 'REMOVED' | null;
+}
+
 export function parseSocketMessage(payload: unknown): SocketMessageSendDto {
   if (!payload || typeof payload !== 'object') throw new BadRequestException('Payload tin nhắn không hợp lệ');
   const value = payload as Record<string, unknown>;

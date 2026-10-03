@@ -11,7 +11,7 @@ Returns the data used by the “Tài khoản của tôi” and account-settings 
 - `uid`, email, full name, phone number, address and private avatar URL.
 - `account_type`: `personal` or `business`.
 - Bank account name, number and bank name.
-- Latest KYC status: `none`, `pending`, `approved` or `rejected`, including rejection reason.
+- KYC status: `approved` whenever the account is verified (`kycVerifiedAt`, the same rule as `kyc_status` on `/investor/me`); otherwise the latest submission's `pending` or `rejected` (with the rejection reason), or `none`.
 - Onboarding completion flags.
 
 ## Edit profile and avatar

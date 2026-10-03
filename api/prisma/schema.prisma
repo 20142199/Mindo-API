@@ -346,6 +346,11 @@ model ChatMessage {
   /// `{ call_id, call_type, status, duration_sec }`. Xem migration
   /// 202609270007_message_call_info.
   callInfo              Json?
+  /// Dữ liệu có cấu trúc của tin hệ thống NHÓM (tạo nhóm, đổi tên/ảnh, thêm,
+  /// xoá, rời): `{ event, actor_user_id, actor_name, target_user_ids?,
+  /// target_names?, new_title?, avatar? }`. `content` vẫn là câu dựng sẵn cho
+  /// app cũ. Xem migration 20261003000000_chat_message_system_info.
+  systemInfo            Json?
   editedAt              DateTime?
   deletedAt             DateTime?
   createdAt             DateTime           @default(now())

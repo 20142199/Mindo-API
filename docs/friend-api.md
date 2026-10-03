@@ -86,6 +86,27 @@ Tệp phải do **chính người gọi** tải lên (qua `POST /api/v1/investor
 
 `GET /friends` trả `alias_avatar_url` **riêng**, không đè lên `avatar_url`: màn sửa liên hệ cần biết cái nào là ảnh mình đặt mới mời "Xoá ảnh hiện tại" đúng lúc, và ảnh hồ sơ thật vẫn phải còn để rơi về. Cả hai đọc trong cùng một lượt truy vấn tệp.
 
+## Realtime: `friend:updated`
+
+Sau mỗi thao tác kết bạn **thành công**, server phát `friend:updated` trên namespace socket `/chat` (cách kết nối xem `docs/messaging-api.md`) vào phòng `user:{id}` của **cả hai** người. Phòng của người bấm cũng nhận, để các máy khác của chính họ cập nhật theo.
+
+```json
+{ "action": "request_accepted", "actor_user_id": "u-b", "target_user_id": "u-a", "at": "2026-10-03T07:00:00.000Z" }
+```
+
+| Thao tác | `action` | `actor_user_id` | `target_user_id` |
+|---|---|---|---|
+| `POST /api/v1/investor/friends/requests` | `request_sent` | người gửi | người nhận |
+| `POST /api/v1/investor/friends/requests/{userId}/accept` | `request_accepted` | người chấp nhận | người đã gửi lời mời |
+| `POST /api/v1/investor/friends/requests/{userId}/reject` | `request_rejected` | người từ chối | người đã gửi lời mời |
+| `DELETE /api/v1/investor/friends/requests/{userId}` | `request_cancelled` | người huỷ | người từng được mời |
+| `DELETE /api/v1/investor/friends/{userId}` | `friend_removed` | người xoá | người bị xoá |
+
+- Chỉ phát **sau** khi giao dịch đã commit. Thao tác lỗi (`404`, `409`) không phát gì.
+- Gói tin là **tín hiệu**, không phải dữ liệu: app nên gọi lại `GET /api/v1/investor/friends` và `GET /api/v1/investor/friends/requests` thay vì tự sửa danh sách. Cùng một gói đến cả hai phía; mỗi bên tự so `actor_user_id`/`target_user_id` với id của mình nếu cần biết ai bấm.
+- Lỗi phát socket bị nuốt (chỉ ghi log), không bao giờ làm hỏng thao tác REST đã ghi xong. Socket rớt lúc app ở nền thì sự kiện mất: app nên tải lại danh sách khi quay lại foreground.
+- **Không** phát cho tên gợi nhớ và ảnh riêng (`PATCH /api/v1/investor/friends/{userId}`, `PATCH /api/v1/investor/friends/{userId}/avatar`): đó là thay đổi một chiều, người kia không được biết.
+
 ## Cấu trúc dữ liệu
 
 - `FriendRequest`: khóa chính `requesterId + recipientId`.

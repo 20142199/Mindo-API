@@ -28,7 +28,14 @@ import {
   UpdateGroupConversationDto,
 } from './chat.dto';
 import { ChatPresenceService } from './chat-presence.service';
-import { RECALLED_MESSAGE_PREVIEW, directConversationKey, messagePreview, searchKey } from './chat.domain';
+import {
+  GroupSystemInfo,
+  RECALLED_MESSAGE_PREVIEW,
+  directConversationKey,
+  messagePreview,
+  quotePreview,
+  searchKey,
+} from './chat.domain';
 
 type BasicUser = Pick<User, 'id' | 'fullName' | 'nickname' | 'email' | 'phone' | 'avatarFileId' | 'lastSeenAt'>;
 
@@ -80,6 +87,8 @@ const conversationInclude = {
 
 type ConversationRow = Prisma.ConversationGetPayload<{ include: typeof conversationInclude }>;
 type MessageRow = Prisma.ChatMessageGetPayload<{ include: { sender: { select: typeof memberUserSelect } } }>;
+/** Tin gốc của một ô trích dẫn, như `serializeMessages` đọc lên */
+type QuoteSource = Pick<MessageRow, 'id' | 'senderId' | 'type' | 'content' | 'deletedAt'>;
 
 @Injectable()
 export class ChatService {
@@ -140,7 +149,12 @@ export class ChatService {
         },
       },
     });
-    const systemMessage = await this.createSystemMessage(userId, conversation.id, `${await this.userName(userId)} đã tạo nhóm`);
+    const actorName = await this.userName(userId);
+    const systemMessage = await this.createSystemMessage(userId, conversation.id, `${actorName} đã tạo nhóm`, {
+      event: 'GROUP_CREATED',
+      actor_user_id: userId,
+      actor_name: actorName,
+    });
     return { ...(await this.getConversation(userId, conversation.id)), system_message: systemMessage };
   }
 
@@ -389,8 +403,21 @@ export class ChatService {
         take: query.limit,
       }),
     ]);
+    /* Tin đã lưu không xét thành viên — tin mình lưu vẫn là của mình. Nhưng ô
+       trích dẫn SỐNG là cửa sổ nhìn vào hội thoại hiện tại: đã rời hay bị xoá
+       khỏi nhóm thì không được thấy tin gốc người ta sửa về sau. Chỉ đọc sống
+       với những hội thoại mình còn ở; còn lại giữ bản chụp lúc gửi. */
+    const conversationIds = [...new Set(rows.map((row) => row.message.conversationId))];
+    const activeConversationIds = new Set(
+      conversationIds.length
+        ? (await this.prisma.conversationMember.findMany({
+          where: { userId, leftAt: null, conversationId: { in: conversationIds } },
+          select: { conversationId: true },
+        })).map((member) => member.conversationId)
+        : [],
+    );
     return {
-      data: await this.serializeMessages(userId, rows.map((row) => row.message)),
+      data: await this.serializeMessages(userId, rows.map((row) => row.message), activeConversationIds),
       extra: pageExtra(query.page, query.limit, total),
     };
   }
@@ -462,13 +489,22 @@ export class ChatService {
     });
     /* Không có gì đổi thì không có gì để kể: bấm Lưu mà không sửa gì cũng
        không được đẩy một dòng rác vào khung chat. */
-    const systemMessage = titleChanged || avatarChanged
-      ? await this.createSystemMessage(
+    let systemMessage = null;
+    if (titleChanged || avatarChanged) {
+      const actorName = await this.userName(userId);
+      systemMessage = await this.createSystemMessage(
         userId,
         conversationId,
-        `${await this.userName(userId)} đã ${this.groupIdentityNotice(titleChanged ? dto.title! : null, avatarChanged ? nextAvatarFileId : undefined)}`,
-      )
-      : null;
+        `${actorName} đã ${this.groupIdentityNotice(titleChanged ? dto.title! : null, avatarChanged ? nextAvatarFileId : undefined)}`,
+        {
+          event: 'GROUP_UPDATED',
+          actor_user_id: userId,
+          actor_name: actorName,
+          new_title: titleChanged ? dto.title! : null,
+          avatar: avatarChanged ? (nextAvatarFileId ? 'CHANGED' : 'REMOVED') : null,
+        },
+      );
+    }
     return { ...(await this.getConversation(userId, conversationId)), system_message: systemMessage };
   }
 
@@ -491,6 +527,25 @@ export class ChatService {
     await this.assertManager(userId, conversationId);
     const ids = [...new Set(dto.member_user_ids)].filter((id) => id !== userId);
     await this.assertFriends(userId, ids);
+    /* Đọc TRƯỚC khi ghi ai đang ở sẵn trong nhóm: createMany bỏ qua trùng và
+       updateMany không đổi gì với họ, nên họ không phải "vừa được thêm". Kể
+       cả họ thì app — dựng câu từng tên một từ `system_info` — sẽ hiện "Bạn đã
+       thêm A và B" khi A ở đó từ lâu. Người đã rời (`leftAt` khác null) được
+       thêm lại thì là vào nhóm thật, vẫn kể. */
+    const alreadyActive = new Set(
+      (await this.prisma.conversationMember.findMany({
+        where: { conversationId, userId: { in: ids }, leftAt: null },
+        select: { userId: true },
+      })).map((member) => member.userId),
+    );
+    const addedIds = ids.filter((id) => !alreadyActive.has(id));
+    /* Không ai mới thì không có gì để làm, cũng không có gì để kể — thay vì
+       một dòng "đã thêm 0 thành viên" vào khung chat của cả nhóm. KHÔNG báo
+       lỗi: app gửi lại sau khi mạng chập (lần đầu đã thêm xong) phải nhận
+       kết quả thành công như lần đầu. */
+    if (!addedIds.length) {
+      return { ...(await this.getConversation(userId, conversationId)), system_message: null };
+    }
     await this.prisma.conversationMember.createMany({
       data: ids.map((memberId) => ({ conversationId, userId: memberId })),
       skipDuplicates: true,
@@ -499,7 +554,14 @@ export class ChatService {
       where: { conversationId, userId: { in: ids } },
       data: { leftAt: null, isHidden: false },
     });
-    const systemMessage = await this.createSystemMessage(userId, conversationId, `${await this.userName(userId)} đã thêm ${ids.length} thành viên`);
+    const [actorName, targetNames] = await Promise.all([this.userName(userId), this.userNames(addedIds)]);
+    const systemMessage = await this.createSystemMessage(userId, conversationId, `${actorName} đã thêm ${addedIds.length} thành viên`, {
+      event: 'MEMBERS_ADDED',
+      actor_user_id: userId,
+      actor_name: actorName,
+      target_user_ids: addedIds,
+      target_names: targetNames,
+    });
     return { ...(await this.getConversation(userId, conversationId)), system_message: systemMessage };
   }
 
@@ -515,7 +577,16 @@ export class ChatService {
       where: { conversationId_userId: { conversationId, userId: memberUserId } },
       data: { leftAt: new Date(), isHidden: true },
     });
-    const systemMessage = await this.createSystemMessage(userId, conversationId, `${await this.userName(memberUserId)} đã được đưa ra khỏi nhóm`);
+    const [actorName, targetName] = await Promise.all([this.userName(userId), this.userName(memberUserId)]);
+    /* Câu cũ không nhắc người làm, và giữ nguyên cho app cũ; ai xoá ai thì
+       nằm ở `system_info`. */
+    const systemMessage = await this.createSystemMessage(userId, conversationId, `${targetName} đã được đưa ra khỏi nhóm`, {
+      event: 'MEMBER_REMOVED',
+      actor_user_id: userId,
+      actor_name: actorName,
+      target_user_ids: [memberUserId],
+      target_names: [targetName],
+    });
     return { conversation_id: conversationId, removed_user_id: memberUserId, system_message: systemMessage };
   }
 
@@ -549,9 +620,15 @@ export class ChatService {
        Trừ lúc nhóm vừa tan — chủ nhóm rời đi mà không còn ai kế nhiệm: viết
        tiếp vào một hội thoại đã xóa thì không ai đọc, mà `lastMessageAt` lại
        bị đẩy lên. */
-    const systemMessage = dissolved
-      ? undefined
-      : await this.createSystemMessage(userId, conversationId, `${await this.userName(userId)} đã rời nhóm`);
+    let systemMessage;
+    if (!dissolved) {
+      const actorName = await this.userName(userId);
+      systemMessage = await this.createSystemMessage(userId, conversationId, `${actorName} đã rời nhóm`, {
+        event: 'MEMBER_LEFT',
+        actor_user_id: userId,
+        actor_name: actorName,
+      });
+    }
     return { conversation_id: conversationId, left: true, system_message: systemMessage };
   }
 
@@ -740,8 +817,11 @@ export class ChatService {
       kind: 'REPLY',
       source_message_id: source.id,
       source_sender_name: source.sender?.nickname ?? source.sender?.fullName ?? 'Tài khoản Mindo',
+      /* Lúc đọc lấy id từ tin gốc; đây là đường lùi khi tin gốc mất người
+         viết (tài khoản bị xoá, `senderId` thành null). */
+      source_sender_id: source.senderId,
       source_message_type: source.type,
-      content_preview: messagePreview(source.type, source.content).slice(0, 200),
+      content_preview: quotePreview(source.type, source.content),
       ...(typeof firstAttachment?.file_id === 'string' ? { attachment_file_id: firstAttachment.file_id } : {}),
     };
   }
@@ -790,9 +870,15 @@ export class ChatService {
     return this.serializeMessage(userId, row);
   }
 
-  private async createSystemMessage(userId: string, conversationId: string, content: string) {
+  /*
+    `content` vẫn là câu dựng sẵn — app cũ và tin cũ chỉ có nó. `info` là phần
+    có cấu trúc để app mới tự dựng câu theo người đang xem ("Bạn", tên gợi
+    nhớ); xem `GroupSystemInfo`. `senderId` CỐ Ý để trống: gán người làm vào
+    đó là `last_message.is_own` đổi nghĩa và app cũ hiện "Bạn: …" sai.
+  */
+  private async createSystemMessage(userId: string, conversationId: string, content: string, info: GroupSystemInfo) {
     const row = await this.prisma.chatMessage.create({
-      data: { conversationId, type: ChatMessageType.SYSTEM, content },
+      data: { conversationId, type: ChatMessageType.SYSTEM, content, systemInfo: { ...info } as Prisma.InputJsonObject },
       include: { sender: true },
     });
     await this.prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: row.createdAt } });
@@ -874,6 +960,9 @@ export class ChatService {
           is_own: lastMessage.senderId === userId,
           message_type: lastMessage.type,
           preview: lastMessage.deletedAt ? RECALLED_MESSAGE_PREVIEW : messagePreview(lastMessage.type, lastMessage.content),
+          /* Để dòng xem trước của tin hệ thống nhóm cũng dựng được "Bạn đã
+             tạo nhóm" — xem `GroupSystemInfo`. */
+          system_info: lastMessage.systemInfo ?? null,
           created_at: lastMessage.createdAt.toISOString(),
         } : null,
         last_message_at: row.lastMessageAt.toISOString(),
@@ -898,26 +987,41 @@ export class ChatService {
     }));
   }
 
-  private async serializeMessages(userId: string, rows: MessageRow[]) {
+  /**
+   * `liveQuoteConversationIds`: chỉ những hội thoại này mới được đọc nội dung
+   * SỐNG cho ô trích dẫn (xem `listSavedMessages`). Không truyền = mọi tin —
+   * các đường còn lại đều đã qua `assertMembership`.
+   */
+  private async serializeMessages(userId: string, rows: MessageRow[], liveQuoteConversationIds?: Set<string>) {
     const fileIds = [...new Set(rows.flatMap((row) => {
       if (!Array.isArray(row.attachments)) return [];
       return row.attachments.map((item) => (item as Record<string, unknown>).file_id).filter((id): id is string => typeof id === 'string');
     }))];
     /* Ô trích dẫn là ảnh chụp lúc gửi (xem `buildQuotedSnapshot`), nên nó
-       KHÔNG tự biết tin gốc về sau có bị thu hồi hay không. Hỏi một lượt cho
-       cả lô thay vì từng tin: một truy vấn thêm cho mỗi trang tin nhắn. */
-    const quotedIds = [...new Set(rows.map((row) => row.replyToId).filter((id): id is string => !!id))];
-    const [fileRows, savedRows, recalledRows] = await Promise.all([
+       KHÔNG tự biết tin gốc về sau bị sửa hay bị thu hồi. Đọc lại tin gốc mỗi
+       lần trả ra — một lượt cho cả lô thay vì từng tin: một truy vấn thêm cho
+       mỗi trang tin nhắn. Không lọc `deletedAt`: tin đã thu hồi vẫn còn dòng
+       (xoá mềm), và chính dòng đó cho biết phải che. */
+    const quotedIds = [...new Set(rows
+      .filter((row) => !row.deletedAt)
+      .map((row) => this.quotedSourceId(row))
+      .filter((id): id is string => !!id))];
+    const [fileRows, savedRows, sourceRows] = await Promise.all([
       fileIds.length ? this.prisma.fileUpload.findMany({ where: { id: { in: fileIds } } }) : [],
       rows.length ? this.prisma.savedChatMessage.findMany({ where: { userId, messageId: { in: rows.map((row) => row.id) } }, select: { messageId: true } }) : [],
       quotedIds.length
-        ? this.prisma.chatMessage.findMany({ where: { id: { in: quotedIds }, deletedAt: { not: null } }, select: { id: true } })
+        ? this.prisma.chatMessage.findMany({
+          where: { id: { in: quotedIds } },
+          select: { id: true, senderId: true, type: true, content: true, deletedAt: true },
+        })
         : [],
     ]);
     const files = new Map(fileRows.map((file) => [file.id, file]));
     const saved = new Set(savedRows.map((row) => row.messageId));
-    const recalled = new Set(recalledRows.map((row) => row.id));
-    return rows.map((row) => this.serializeMessageWithMaps(userId, row, files, saved, recalled));
+    const sources = new Map(sourceRows.map((row) => [row.id, row]));
+    return rows.map((row) => this.serializeMessageWithMaps(
+      userId, row, files, saved, sources, !liveQuoteConversationIds || liveQuoteConversationIds.has(row.conversationId),
+    ));
   }
 
   private async serializeMessage(userId: string, row: MessageRow) {
@@ -930,13 +1034,67 @@ export class ChatService {
    * Giữ lại tên người bị trích: đó không phải nội dung, và bỏ nốt thì ô trích
    * dẫn thành một mẩu trống không rõ đang nói về ai.
    */
-  private redactQuote(snapshot: unknown) {
-    if (!snapshot || typeof snapshot !== 'object') return snapshot;
-    const { attachment_file_id: _dropped, ...rest } = snapshot as Record<string, unknown>;
+  private redactQuote(snapshot: Record<string, unknown>) {
+    const { attachment_file_id: _dropped, ...rest } = snapshot;
     return { ...rest, content_preview: RECALLED_MESSAGE_PREVIEW };
   }
 
-  private serializeMessageWithMaps(userId: string, row: MessageRow, files: Map<string, FileUpload>, saved: Set<string>, recalled: Set<string>) {
+  /**
+   * Id tin gốc của một tin trả lời.
+   *
+   * `replyToId` là `onDelete: SetNull`, nên tin gốc bị xoá CỨNG thì cột đó
+   * thành null trong khi bản chụp vẫn còn nguyên nội dung. Lấy id từ bản chụp
+   * để lần tra không ra gì — và ô trích dẫn bị che như đã thu hồi.
+   */
+  private quotedSourceId(row: MessageRow) {
+    if (row.replyToId) return row.replyToId;
+    const snapshot = row.quotedMessageSnapshot as Record<string, unknown> | null;
+    return snapshot && typeof snapshot === 'object' && typeof snapshot.source_message_id === 'string'
+      ? snapshot.source_message_id
+      : null;
+  }
+
+  /**
+   * Ô trích dẫn với nội dung SỐNG của tin gốc.
+   *
+   *   - còn nguyên: chữ hiện tại của tin gốc (đã sửa thì là chữ mới), cắt đúng
+   *     như lúc chụp — `quotePreview`;
+   *   - đã thu hồi, hoặc không còn dòng nào (tin bị xoá mềm, nên mất dòng là
+   *     bị xoá cứng): che như thu hồi, kèm `recalled: true`.
+   *
+   * `source_sender_id` để app tự hiện "Bạn" hay tên gợi nhớ thay cho
+   * `source_sender_name` chụp sẵn. Bản chụp cũ không lưu id, nên tin gốc mất
+   * người viết thì có thể là null.
+   *
+   * `live: false` (tin đã lưu của nhóm mình không còn ở): giữ chữ của bản
+   * chụp, chỉ còn việc che khi tin gốc đã thu hồi.
+   */
+  private liveQuote(snapshot: unknown, source: QuoteSource | undefined, live = true) {
+    if (!snapshot || typeof snapshot !== 'object') return snapshot;
+    const base = snapshot as Record<string, unknown>;
+    const snapshotSenderId = typeof base.source_sender_id === 'string' ? base.source_sender_id : null;
+    const sourceSenderId = source?.senderId ?? snapshotSenderId;
+    if (!source || source.deletedAt) {
+      return { ...this.redactQuote(base), source_sender_id: sourceSenderId, recalled: true };
+    }
+    if (!live) return { ...base, source_sender_id: sourceSenderId, recalled: false };
+    return {
+      ...base,
+      source_message_type: source.type,
+      content_preview: quotePreview(source.type, source.content),
+      source_sender_id: sourceSenderId,
+      recalled: false,
+    };
+  }
+
+  private serializeMessageWithMaps(
+    userId: string,
+    row: MessageRow,
+    files: Map<string, FileUpload>,
+    saved: Set<string>,
+    sources: Map<string, QuoteSource>,
+    liveQuote = true,
+  ) {
     const attachments = Array.isArray(row.attachments)
       ? row.attachments.map((value) => {
         const item = value as Record<string, unknown>;
@@ -956,13 +1114,17 @@ export class ChatService {
       link_preview: row.deletedAt ? null : row.linkPreview ?? null,
       /* Nhật ký cuộc gọi — chỉ tin hệ thống loại đó mới có. */
       call_info: row.callInfo ?? null,
+      /* Tin hệ thống của nhóm — xem `GroupSystemInfo`. Tin cũ là null. */
+      system_info: row.systemInfo ?? null,
       attachments: row.deletedAt ? [] : attachments,
       reply_to_message_id: row.replyToId,
-      /* Thu hồi phải với tới cả bản sao nằm trong ô trích dẫn của người
-         khác — còn đọc được thì coi như chưa thu hồi. */
-      quoted_message: row.replyToId && recalled.has(row.replyToId)
-        ? this.redactQuote(row.quotedMessageSnapshot)
-        : row.quotedMessageSnapshot,
+      /* Sửa và thu hồi đều phải với tới bản sao nằm trong ô trích dẫn của
+         người khác — còn đọc được chữ cũ thì coi như chưa sửa, chưa thu hồi.
+         Chính tin này thu hồi rồi thì ô trích dẫn cũng đi theo, như chữ và
+         ảnh của nó. */
+      quoted_message: row.deletedAt
+        ? null
+        : this.liveQuote(row.quotedMessageSnapshot, sources.get(this.quotedSourceId(row) ?? ''), liveQuote),
       is_saved: saved.has(row.id),
       edited_at: row.editedAt?.toISOString() ?? null,
       deleted_at: row.deletedAt?.toISOString() ?? null,
@@ -989,5 +1151,16 @@ export class ChatService {
   private async userName(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { fullName: true, nickname: true } });
     return user?.nickname ?? user?.fullName ?? 'Một thành viên';
+  }
+
+  /** Như `userName` cho cả lô, một truy vấn, giữ đúng thứ tự `userIds` */
+  private async userNames(userIds: string[]) {
+    if (!userIds.length) return [];
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, fullName: true, nickname: true },
+    });
+    const byId = new Map(users.map((user) => [user.id, user.nickname ?? user.fullName]));
+    return userIds.map((id) => byId.get(id) ?? 'Một thành viên');
   }
 }
