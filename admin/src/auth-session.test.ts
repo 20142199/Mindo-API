@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { isTokenExpired, tokenExpiresAt } from './auth-session';
 
 function jwt(payload: Record<string, unknown>) {
-  return `header.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.signature`;
+  const encoded = btoa(JSON.stringify(payload))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+  return `header.${encoded}.signature`;
 }
 
 describe('admin auth session', () => {
