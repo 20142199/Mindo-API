@@ -159,8 +159,11 @@ export class ChatController {
     @Body() dto: AddGroupMembersDto,
   ) {
     const data = await this.chat.addMembers(authUser(req).id, conversationId, dto);
-    await this.realtime.publishConversation(conversationId);
-    this.realtime.publishSystemMessage(conversationId, data.system_message);
+    /* Không ai mới (gửi lại lần hai) thì nhóm không đổi gì để phát */
+    if (data.system_message) {
+      await this.realtime.publishConversation(conversationId);
+      this.realtime.publishSystemMessage(conversationId, data.system_message);
+    }
     return ok(data, 'Đã thêm thành viên');
   }
 

@@ -24,6 +24,7 @@ Server phát:
 - `typing:peer`
 - `presence:updated`: `{ user_id, is_online, last_seen_at }`
 - `conversation:updated`, `conversation:removed`, `conversation:deleted`
+- `friend:updated`: quan hệ bạn bè vừa đổi (gửi / chấp nhận / từ chối / huỷ lời mời, xoá bạn) — xem `docs/friend-api.md#realtime-friendupdated`
 
 `presence:updated` bắn vào `user:{id}` của MỌI người có chung ít nhất một hội thoại chưa xoá với người vừa đổi trạng thái. Chỉ bắn ở socket ĐẦU TIÊN khi vào mạng và socket CUỐI CÙNG khi rời — mở thêm thiết bị thứ hai không sinh sự kiện, và đóng một trong hai thiết bị cũng vậy. `last_seen_at` chỉ có giá trị ở gói `is_online: false`; nó được ghi vào `User.lastSeenAt` cùng lúc.
 
@@ -33,7 +34,7 @@ Tập socket đang mở nằm ở Redis (`mindo:chat:online:{userId}`), mỗi th
 
 `clientMessageId` phải là UUID v4. Khi app retry cùng ID, server trả `status: duplicate` và không tạo bản ghi thứ hai.
 
-Tin hệ thống (tạo nhóm, thêm/xóa thành viên) cũng được phát qua `message:new` như mọi tin khác, `sender` là `null`. Nó không sinh push notification.
+Tin hệ thống (tạo nhóm, thêm/xóa thành viên) cũng được phát qua `message:new` như mọi tin khác, `sender` là `null`, kèm `system_info` (xem phần REST). Nó không sinh push notification.
 
 **`message:new` và `message:updated` KHÔNG kèm `is_own`.** Trường đó trả lời câu "tin này có phải của bạn không", nên nó chỉ có nghĩa trên phản hồi REST — nơi có đúng một người hỏi. Một bản tin phát sóng thì không có "bạn" nào cả. Client tự so `message.sender.user_id` với user id của chính mình; đó cũng là cách duy nhất đúng, vì chỉ client mới biết nó đang đăng nhập bằng tài khoản nào.
 
@@ -117,7 +118,7 @@ Body gửi tin qua REST:
 
 `message_type` nhận `TEXT`, `IMAGE`, `FILE`; `SYSTEM` chỉ server được tạo. Phản hồi trả lại đúng dạng chữ hoa này.
 
-Gửi kèm `reply_to_message_id` thì mọi phản hồi sau đó mang thêm `quoted_message` — một ảnh chụp tin gốc, chốt lại ngay lúc gửi nên không đổi theo nếu tin gốc bị sửa hay thu hồi về sau:
+Gửi kèm `reply_to_message_id` thì mọi phản hồi sau đó mang thêm `quoted_message`. Lúc gửi server chụp lại tin gốc, nhưng mỗi lần TRẢ RA (danh sách tin, tin đã lưu, phản hồi gửi/sửa, `message:new`, `message:updated`) nó đọc lại tin gốc và thay nội dung bằng bản SỐNG:
 
 ```json
 {
@@ -128,14 +129,45 @@ Gửi kèm `reply_to_message_id` thì mọi phản hồi sau đó mang thêm `qu
     "source_sender_name": "Nguyen Hong Son Nickname",
     "source_message_type": "TEXT",
     "content_preview": "Chào B, tin thật đầu tiên",
-    "attachment_file_id": "…"
+    "attachment_file_id": "…",
+    "source_sender_id": "cmuh5u9xk0000p6ub2q7hd3l1",
+    "recalled": false
   }
 }
 ```
 
+- Tin gốc đã sửa: `content_preview` là chữ MỚI, cắt y như lúc chụp.
+- Tin gốc đã thu hồi, hoặc không còn trong CSDL: `content_preview` là `"Tin nhắn đã được thu hồi"`, `attachment_file_id` bị bỏ, `recalled: true`. Tên người viết vẫn giữ.
+- `source_sender_id`: id người viết tin gốc, để app hiện "Bạn" hay tên gợi nhớ thay cho `source_sender_name` (tên chụp lúc gửi). Có thể `null` với tin trả lời cũ khi tin gốc không còn người viết.
+- Chính tin trả lời đã bị thu hồi (`deleted_at` khác null): `quoted_message` là `null`, như `content`, `attachments` và `link_preview`.
+- `GET /saved-messages`: tin đã lưu thuộc hội thoại mình đã rời hoặc bị xoá khỏi thì ô trích dẫn giữ chữ CHỤP lúc gửi (không đọc bản sống, để không thấy tin gốc người ta sửa về sau); tin gốc đã thu hồi thì vẫn che và `recalled: true`.
+- Sự kiện `message:updated` / `message:deleted` của tin GỐC không kéo theo sự kiện nào cho các tin trả lời nó; app đang mở hội thoại tự vá ô trích dẫn trong bộ nhớ, còn lần tải sau thì server đã trả bản sống.
+
 Tên trường bên trong có tiền tố `source_`, KHÔNG phải `message_id`/`sender_name`/`preview`. `attachment_file_id` chỉ xuất hiện khi tin gốc có tệp đính kèm, `content_preview` cắt ở 200 ký tự. Đoán tên khác đi thì client không văng lỗi — nó dựng ra một khối trích dẫn rỗng, đúng một vạch màu không chữ, và chỉ lộ ra khi tải lại màn.
 
 `POST /conversations/groups`, `PATCH /groups/:id`, `POST /groups/:id/members` và `DELETE /groups/:id/members/:userId` trả thêm `system_message` — chính tin vừa được phát qua `message:new`. Ở `PATCH /groups/:id` trường này là `null` khi lần lưu đó không đổi gì thật.
+
+Mọi tin (và `last_message` của hội thoại) có trường `system_info`. Tin hệ thống của NHÓM mang:
+
+```json
+{
+  "event": "MEMBERS_ADDED",
+  "actor_user_id": "…",
+  "actor_name": "Nguyen Hong Son",
+  "target_user_ids": ["…", "…"],
+  "target_names": ["Anna", "Trần Bình"]
+}
+```
+
+| `event` | Khi nào | Trường thêm |
+|---|---|---|
+| `GROUP_CREATED` | tạo nhóm | — |
+| `GROUP_UPDATED` | đổi tên và/hoặc ảnh nhóm | `new_title` (null nếu tên không đổi), `avatar`: `CHANGED` / `REMOVED` / null |
+| `MEMBERS_ADDED` | thêm thành viên | `target_user_ids`, `target_names` (cùng thứ tự) — chỉ những người THẬT SỰ vừa vào (kể cả người từng rời được thêm lại), không gồm người đang ở sẵn trong nhóm; số trong `content` cũng đếm như vậy |
+| `MEMBER_REMOVED` | quản trị viên xoá một người | `target_user_ids`, `target_names` (một phần tử) |
+| `MEMBER_LEFT` | tự rời nhóm | — |
+
+`content` vẫn là câu dựng sẵn y như trước để app cũ đọc được, nhưng nó viết theo góc nhìn của không ai cả. App mới dựng câu từ `system_info`: `actor_user_id` là mình thì "Bạn", là bạn bè thì tên gợi nhớ, còn lại thì `actor_name`. `actor_name`/`target_names` là tên CHỤP lúc xảy ra, dùng khi người đó đã rời nhóm và không còn tra được. `sender` của tin hệ thống vẫn `null`. Tin cũ (trước migration `20261003000000_chat_message_system_info`), tin thường và nhật ký cuộc gọi có `system_info: null`; gặp `null` hoặc `event` lạ thì hiện `content`.
 
 ### Nhóm
 
@@ -143,7 +175,7 @@ Tên trường bên trong có tiền tố `source_`, KHÔNG phải `message_id`/
   - `avatar_file_id: null` là XOÁ ảnh nhóm. Không gửi khoá đó mới là để ảnh nguyên như cũ — hai thứ này khác nhau, đừng gửi chuỗi rỗng.
   - Mỗi lần đổi sinh một tin hệ thống trong khung chat ("... đã đổi tên nhóm thành ..."). Đổi cả tên và ảnh trong cùng một lời gọi thì GỘP một tin, nên app hãy gửi một `PATCH` duy nhất thay vì hai.
   - Đặt lại đúng giá trị đang có thì không sinh tin nào và `system_message` là `null`.
-- `POST /groups/:conversationId/members`: thêm `member_user_ids`.
+- `POST /groups/:conversationId/members`: thêm `member_user_ids`. Mọi người trong danh sách đều đang ở sẵn trong nhóm thì trả `400` ("Những người này đã ở trong nhóm") và không ghi tin hệ thống.
 - `DELETE /groups/:conversationId/members/:userId`: quản trị viên xóa thành viên.
 - `DELETE /groups/:conversationId/leave`: rời nhóm; nếu chủ nhóm rời, quyền chủ nhóm được chuyển cho thành viên còn lại.
 - `DELETE /groups/:conversationId`: chỉ chủ nhóm được xóa toàn bộ nhóm.
